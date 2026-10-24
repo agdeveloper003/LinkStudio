@@ -1,0 +1,21 @@
+name: 2 - 16-QAM and soft demapping
+category: Tutorials
+description: Gray-labelled 16-QAM with log-likelihood ratios. Watch the LLR histogram separate
+  as the SNR grows, and change map.order to 4, 64 or 256.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: qam, order: 16}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 10.0}}
+  demap: {type: demapper, params: {method: maxlog}}
+  ber: {type: ber_meter, params: {bits_per_symbol: 4}}
+  evm: {type: evm_meter}
+chain: [src, map, awgn, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - awgn.out -> evm.in
+probes:
+  - {key: awgn.out, view: constellation}
+  - {key: demap.out, view: histogram}

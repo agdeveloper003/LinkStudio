@@ -1,0 +1,22 @@
+\chapter{Scenario library}\label{app:scenarios}
+
+The \numscenarios{} scenario files shipped in \file{backend/scenarios/} (subsystem files
+excluded) are listed below. The table is generated from the files themselves. Open them from
+the GUI scenario browser (Ctrl+O) or run them with \code{python -m linkstudio run <file>}. Each
+scenario's \code{description} field explains what to observe and which parameters to sweep.
+
+\makeatletter\let\primitiveinput\@@input\makeatother
+\begin{center}
+\footnotesize
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}p{5.9cm}>{\raggedright\arraybackslash}p{3.9cm}cl@{}}
+\toprule
+\textbf{Category} & \textbf{File} & \textbf{Name} & \textbf{Blocks} & \textbf{Mode}\\
+\midrule
+\endhead
+\primitiveinput generated/scenarios.tex 
+\bottomrule
+\end{longtable}
+\end{center}
+
+Two reusable subsystems, \file{subsystems/coded_qam_tx.yaml} and
+\file{subsystems/coded_qam_rx.yaml}, are used by \file{coded_link_subsystems.yaml}.

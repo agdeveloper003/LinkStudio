@@ -1,0 +1,21 @@
+name: Free-space optical link with turbulence
+category: Optical
+description: 1 Gb/s OOK through atmospheric turbulence (gamma-gamma scintillation, constant over
+  a frame). Strong turbulence makes some frames fail (see ber.fer); compare the lognormal model.
+seed: 1
+batch_size: 64
+blocks:
+  src: {type: random_bits, params: {n_bits: 1000}}
+  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 1000000000.0}}
+  tx: {type: intensity_modulator, params: {power_dbm: -26.0, extinction_ratio_db: 15.0}}
+  fso: {type: fso_turbulence, params: {model: gamma_gamma, alpha: 4.0, beta: 1.5}}
+  pd: {type: photodiode, params: {thermal_noise_pa_rthz: 10.0}}
+  agc: {type: agc}
+  dec: {type: line_decoder}
+  ber: {type: ber_meter}
+chain: [src, lc, tx, fso, pd, agc, dec, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: fso.csi, view: csi}
+  - {key: agc.out, view: constellation}

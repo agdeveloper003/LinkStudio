@@ -1,0 +1,17 @@
+name: 1 - BPSK over AWGN
+category: Tutorials
+description: The simplest digital link. Start Live and move awgn.snr_db, then open Sweep, sweep
+  awgn.snr_db from 0 to 10 and overlay the BPSK theory curve.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 2000}}
+  map: {type: mapper, params: {scheme: psk, order: 2}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 6.0}}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+chain: [src, map, awgn, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}

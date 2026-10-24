@@ -1,0 +1,27 @@
+name: CRC + convolutional code over fading
+category: Coding
+description: A complete coded link - CRC-24A, rate-1/2 convolutional code and bit interleaving
+  protect QPSK over fast Rayleigh fading. The CRC decoder reports the block error rate.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 976}}
+  crc: {type: crc_encoder, params: {polynomial: crc24a}}
+  enc: {type: conv_encoder}
+  il: {type: interleaver, params: {kind: random}}
+  map: {type: mapper, params: {scheme: psk, order: 4}}
+  fad: {type: flat_fading, params: {variation: fast}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 8.0}}
+  eq: {type: one_tap_equalizer}
+  demap: {type: demapper, params: {method: maxlog}}
+  dil: {type: interleaver, params: {kind: random, inverse: true}}
+  dec: {type: viterbi_decoder}
+  crcd: {type: crc_decoder, params: {polynomial: crc24a}}
+  ber: {type: ber_meter}
+chain: [src, crc, enc, il, map, fad, awgn, eq, demap, dil, dec, crcd, ber.rx]
+edges:
+  - fad.csi -> eq.csi
+  - src.out -> ber.tx
+probes:
+  - {key: eq.out, view: constellation}
+  - {key: demap.out, view: histogram}

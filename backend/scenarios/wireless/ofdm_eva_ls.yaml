@@ -1,0 +1,33 @@
+name: OFDM over EVA multipath
+category: Wireless
+description: 16-QAM OFDM through a time-varying 3GPP EVA channel with LS pilot-based channel estimation.
+  Switch the estimator to 'perfect' or raise the Doppler to see the difference.
+seed: 2
+batch_size: 8
+blocks:
+  src: {type: random_bits, params: {n_bits: 8000}}
+  map: {type: mapper, params: {scheme: qam, order: 16}}
+  ofdm: {type: ofdm_modulator, params: {n_fft: 128, cp_len: 16, n_active: 96, pilot_spacing: 4}}
+  ch: {type: multipath, params: {preset: EVA, variation: jakes, doppler_hz: 30.0}}
+  awgn: {type: awgn, params: {mode: esn0, snr_db: 25.0}}
+  demod: {type: ofdm_demodulator}
+  est: {type: ofdm_channel_estimator, params: {method: ls}}
+  eq: {type: ofdm_equalizer}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+  evm: {type: evm_meter}
+chain: [src, map, ofdm, ch, awgn, demod, est]
+edges:
+  - demod.out -> eq.in
+  - est.out -> eq.csi
+  - ch.csi -> est.csi
+  - eq.out -> demap.in
+  - demap.out -> ber.rx
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - eq.out -> evm.in
+probes:
+  - {key: ofdm.out, view: spectrum}
+  - {key: est.out, view: csi}
+  - {key: eq.out, view: constellation}
+  - {key: demod.out, view: grid}

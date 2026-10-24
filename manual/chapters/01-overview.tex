@@ -1,0 +1,154 @@
+\chapter{Overview and quick start}\label{ch:overview}
+
+\section{What LinkStudio is}
+LinkStudio simulates the physical layer of a communication link at the level of
+\emph{complex-envelope samples}. A link is described as a graph of blocks. Every block is a
+small, self-contained model (a QAM mapper, an 80-km fiber span, a Viterbi decoder, a BER
+meter) with typed inputs and outputs and validated parameters. The engine executes the
+graph on \emph{batches} of independent frames and accumulates metrics until a stop criterion
+is met.
+
+\Cref{fig:architecture} shows the layers of the code base. They depend on each other only
+downwards:
+\begin{itemize}
+  \item the \textbf{core} knows nothing about communications;
+  \item the \textbf{PHY library} knows nothing about the user interface;
+  \item the \textbf{API} turns graphs and results into JSON for the browser front end.
+\end{itemize}
+The same scenario therefore runs identically from a Python script, the CLI or the GUI.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=3mm,
+  lay/.style={draw=#1,fill=#1!6,rounded corners=3pt,minimum width=12.0cm,minimum height=13mm,
+    align=left,font=\sffamily\footnotesize,inner sep=5pt,text width=11.6cm}]
+  \node[lay=accent4] (ui) {\textbf{Front end} \hfill\file{frontend/src}\\
+    React + TypeScript: graph editor (React Flow), inspector, Live / Simulate / Sweep panels, scopes};
+  \node[lay=accent5,below=of ui] (api) {\textbf{API} \hfill\file{linkstudio/api}\\
+    FastAPI: REST (blocks, scenarios, validate, layout, export, jobs), WebSocket live mode, probes};
+  \node[lay=accent3,below=of api] (phy) {\textbf{PHY library} \hfill\file{linkstudio/phy}\\
+    \numblocks{} registered blocks: sources, modulation, waveform, channel, sync, receiver, MIMO,
+    coding, wireline, optical, metrics; closed-form theory};
+  \node[lay=accent,below=of phy] (core) {\textbf{Core engine} \hfill\file{linkstudio/core}\\
+    Signal, Block, Port, registry, Graph (validation, execution), Subsystem, Simulation,
+    Sweep, Scenario (YAML)};
+  \node[lay=gray,below=of core] (np) {\textbf{Numerics}\\ NumPy, SciPy (FFT, special
+    functions, sparse matrices), Pydantic (parameter validation), PyYAML};
+  \node[font=\sffamily\scriptsize,color=commentcolor,right=2mm of ui.east,anchor=west,rotate=90,
+    yshift=-3mm] at ($(ui.east)!0.5!(np.east)$) {depends on $\downarrow$};
+  \draw[->,thick,commentcolor] ($(ui.east)+(0.25,0)$) -- ($(np.east)+(0.25,0)$);
+  \node[greybox,left=4mm of api,minimum width=18mm] (cli) {CLI\\\file{linkstudio.cli}};
+  \node[greybox,left=4mm of phy,minimum width=18mm] (scripts) {scripts\\\file{scripts/}};
+  \node[greybox,left=4mm of core,minimum width=18mm] (tests) {tests\\\file{tests/}};
+  \draw[->,commentcolor] (cli.east) -- (api.west);
+  \draw[->,commentcolor] (scripts.east) -- (phy.west);
+  \draw[->,commentcolor] (tests.east) -- (core.west);
+\end{tikzpicture}
+\caption{Layers of LinkStudio. Paths are relative to the repository; Python packages live in
+\file{backend/}.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Capabilities at a glance}
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Domain} & \textbf{Models} \\
+\midrule
+Modulation & PSK, square QAM, PAM, custom constellations with Gray labels; hard, exact and max-log soft demapping\\
+Waveforms & RRC/RC/Gaussian/rectangular pulses, matched filter, rate changes, OFDM with pilots and CP, DMT with water-filling\\
+Channels & AWGN (SNR, $E_s/N_0$, $E_b/N_0$), Rayleigh/Rician flat fading, Jakes Doppler, 3GPP EPA/EVA/ETU, MIMO with antenna correlation\\
+RF front end & carrier offset, phase noise, IQ imbalance, PA models (Rapp, Saleh, clipping), quantizer, timing offset\\
+Synchronization & Schmidl--Cox frame sync, Gardner timing loop with Oerder--Meyr start, decision-directed PLL, CP-based OFDM sync\\
+Receivers & one-tap, ZF/MMSE FIR, LMS/NLMS, FFE+DFE, CTLE, echo canceller, ZF/MMSE/ML MIMO detection, Alamouti\\
+Coding & CRC, scrambler, interleavers, repetition, Hamming, convolutional + Viterbi, puncturing, QC-LDPC (BP), polar (SC)\\
+Wireline & NRZ, Manchester, AMI, MLT-3, 4B/5B, 64B/66B, skin-effect cables, ANSI NEXT/FEXT, impulse noise, jitter, ADSL/VDSL DMT\\
+Optical & laser/EML with chirp and RIN, IQ Mach--Zehnder, NLSE/Manakov fiber with PMD, EDFA with ASE, WDM, PIN/APD, coherent receiver and DSP, FSO turbulence\\
+Metrics & BER with confidence interval, SER, FER/BLER, EVM/MER, power/PAPR, OSNR, iteration counts\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Installation}
+LinkStudio needs Python 3.11 or newer. The front end is already built in
+\file{frontend/dist}; Node.js is only needed to modify it.
+\begin{lstlisting}[style=shell]
+cd backend
+pip install -e ".[ui,viz,dev]"    # engine + web server + plotting + tests
+python -m pytest                   # the test-suite (about 170 tests)
+python scripts/main.py --quick     # runs every demo and compares with theory
+\end{lstlisting}
+
+\section{Three ways to run a simulation}\label{sec:three-ways}
+
+\paragraph{1. The graphical editor.}
+\code{python -m linkstudio serve} opens \url{http://127.0.0.1:8000}. Pick a scenario from the
+browser (\cref{ch:interfaces}), press \emph{Start live} and move the
+\prm{snr_db} slider of the \blk{awgn} block: constellation, spectrum and BER update while
+the simulation runs.
+
+\paragraph{2. A YAML scenario from the command line.}
+Scenario files describe the graph and how to run it (\cref{sec:scenarios}):
+\begin{lstlisting}[style=shell]
+python -m linkstudio run scenarios/tutorials/01_bpsk_awgn.yaml
+python -m linkstudio blocks              # list all block types
+python -m linkstudio describe fiber      # parameters and ports of one block
+\end{lstlisting}
+
+\paragraph{3. The Python API.}
+The snippet below builds the graph of \cref{fig:first-graph} and measures the BER of QPSK at
+$E_b/N_0=6$\,dB. The result is about $2.4\times10^{-3}$, the value of
+$\Q(\sqrt{2E_b/N_0})$.
+\begin{lstlisting}[style=py,numbers=none]
+import linkstudio as cs
+
+g = cs.Graph("qpsk")
+g.create("src", "random_bits", n_bits=2000)
+g.create("map", "mapper", scheme="psk", order=4)
+g.create("awgn", "awgn", snr_db=6.0)                  # Eb/N0 by default
+g.create("demap", "demapper", method="hard")
+g.create("ber", "ber_meter")
+g.chain("src", "map", "awgn", "demap", "ber.rx")     # default ports
+g.connect("src", "ber.tx")                            # explicit edge
+
+result = cs.Simulation(g, batch_size=64, seed=1).run(
+    stop=cs.StopCriteria.errors("ber.bit_errors", 200))
+print(result.summary())
+\end{lstlisting}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=7mm]
+  \node[blockbox] (src) {\blk{src}\\random\_bits};
+  \node[blockbox,right=of src] (map) {\blk{map}\\mapper};
+  \node[warmbox,right=of map] (awgn) {\blk{awgn}\\awgn};
+  \node[blockbox,right=of awgn] (dem) {\blk{demap}\\demapper};
+  \node[greenbox,right=of dem] (ber) {\blk{ber}\\ber\_meter};
+  \draw[sig,kbits] (src) -- node[above,lbl]{BITS} (map);
+  \draw[sig,ksym] (map) -- node[above,lbl]{SYMBOLS} (awgn);
+  \draw[sig,ksym] (awgn) -- (dem);
+  \draw[sig,kbits] (dem) -- node[above,lbl]{rx} (ber);
+  \draw[sig,kbits] (src.south) -- ++(0,-6mm) -| node[pos=0.25,below,lbl]{tx} (ber.south);
+\end{tikzpicture}
+\caption{The graph built by the quick-start snippet. Edge colours follow the signal kind.}
+\label{fig:first-graph}
+\end{figure}
+
+\section{Repository map}
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\file{backend/linkstudio/core/} & engine: \file{signal.py}, \file{block.py}, \file{registry.py}, \file{graph.py}, \file{composite.py}, \file{simulation.py}, \file{sweep.py}, \file{scenario.py}\\
+\file{backend/linkstudio/phy/} & block library; \file{dsp/} holds shared numerical helpers (filters, constellations, LFSR, analysis), \file{theory.py} closed-form references\\
+\file{backend/linkstudio/api/} & web server: \file{app.py}, \file{editor.py} (GUI $\leftrightarrow$ graph), \file{jobs.py}, \file{probes.py}\\
+\file{backend/scenarios/} & ready-made scenarios grouped by category (\cref{app:scenarios})\\
+\file{backend/scripts/} & \file{main.py} and one demo per subsystem, each checking theory\\
+\file{backend/tests/} & pytest suite (engine, DSP, physics, API, every scenario)\\
+\file{frontend/} & React application\\
+\file{docs/} & short Markdown notes (architecture, engine, GUI)\\
+\file{manual/} & this manual and its generator\\
+\bottomrule
+\end{tabularx}
+\end{center}

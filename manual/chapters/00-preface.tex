@@ -1,0 +1,82 @@
+\chapter{About this manual}
+
+LinkStudio is a block-based simulator of the physical layer (PHY) of communication systems. A
+simulation is a directed graph of blocks: sources, modulators, pulse shapers, channels,
+synchronizers, equalizers, decoders and meters. The same engine covers radio links,
+copper lines and optical fiber. It is driven from Python, from YAML scenario files, from the
+command line or from a browser-based editor.
+
+This manual has two goals and is organized accordingly.
+
+\begin{description}[leftmargin=0pt,font=\sffamily\bfseries\color{accent}]
+  \item[Part I -- Using and extending LinkStudio.] How the engine works (signals, blocks, graphs,
+  Monte-Carlo runs, sweeps, scenarios) and how to drive it from the GUI, the CLI and the
+  Python API. It ends with a developer guide for writing new blocks.
+  \item[Part II -- Theory and implementation.] One chapter per subsystem. Every chapter first
+  develops the theory with the notation used in the code, then shows \emph{where} and
+  \emph{how} it is implemented, and finally validates the implementation against a closed-form
+  result. Part II can be read as a compact textbook on digital transmission whose equations
+  can all be checked in the code.
+\end{description}
+
+\section*{How to read the chapters of Part II}
+Each theory chapter follows the same pattern:
+\begin{enumerate}
+  \item \textbf{Model.} The physical or mathematical model, derived with the assumptions stated
+  explicitly.
+  \item \textbf{Implementation.} A blue \emph{In the code} box names the blocks, files and
+  metadata involved. Short excerpts show the lines that realize the key equations, for example
+  the split-step solver of the nonlinear Schrödinger equation (\cref{lst:ssfm}). Excerpts are
+  extracted automatically from the source, so their file names and line numbers match the code
+  base this manual was built from.
+  \item \textbf{Validation.} A figure comparing the simulator with theory. All measured curves
+  in this manual (markers in the plots) are produced by running the real blocks with
+  \file{manual/tools/generate.py}; solid lines are closed-form results.
+\end{enumerate}
+
+Green \emph{Key idea} boxes summarize a result; orange \emph{Watch out} boxes point at
+common mistakes or at modelling limitations.
+
+\section*{Typographic conventions}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\blk{awgn} & a block type (as written in scenarios and in the GUI palette)\\
+\prm{snr_db} & a block parameter\\
+\meta{noise_var} & a metadata key travelling with a signal\\
+\file{linkstudio/phy/optical.py} & a file, relative to \file{backend/}\\
+\kind{SAMPLES} & a signal kind (\cref{sec:signal})\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Notation}
+\begin{center}
+\begin{tabular}{@{}ll@{\qquad}ll@{}}
+\toprule
+$x(t)$, $x[n]$ & complex envelope (continuous, sampled) & $f_s$ & sample rate\\
+$T$, $R_s=1/T$ & symbol period, symbol rate & $N_{\mathrm{sps}}$ & samples per symbol\\
+$E_s$, $E_b$ & energy per symbol, per information bit & $N_0$ & one-sided noise PSD\\
+$M$, $k=\log_2 M$ & constellation size, bits per symbol & $R$ & code rate\\
+$\CN(\mu,\sigma^2)$ & circular complex Gaussian & $\Q(x)$ & Gaussian tail function\\
+$(\cdot)\conj$, $(\cdot)\T$, $(\cdot)\Her$ & conjugate, transpose, Hermitian & $\star$ & convolution\\
+$\F\{\cdot\}$ & Fourier transform & $\E[\cdot]$ & expectation\\
+\bottomrule
+\end{tabular}
+\end{center}
+Fourier transforms follow the NumPy sign convention used everywhere in the code:
+\begin{equation}
+  X(\omega)=\int x(t)\,e^{-j\omega t}\,dt, \qquad x(t)=\frac{1}{2\pi}\int X(\omega)\,e^{j\omega t}\,d\omega .
+  \label{eq:fourier-convention}
+\end{equation}
+This convention fixes the signs of the dispersion operator and of the nonlinear phase in the
+fiber model (\cref{sec:nlse}). The discrete transforms are \code{np.fft.fft} and
+\code{np.fft.ifft}; they are unitary (\code{norm="ortho"}) in OFDM and DMT.
+
+\section*{Rebuilding this manual}
+\begin{lstlisting}[style=shell]
+python manual/tools/generate.py      # run the simulator, extract excerpts and tables
+cd manual && latexmk -pdf linkstudio-manual.tex
+\end{lstlisting}
+Re-running the generator after a code change updates every figure, excerpt and reference
+table, so the manual stays consistent with the code.

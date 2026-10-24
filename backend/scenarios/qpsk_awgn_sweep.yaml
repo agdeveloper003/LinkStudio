@@ -1,0 +1,23 @@
+# Uncoded QPSK over AWGN: BER/SER versus Eb/N0.
+#   python -m linkstudio run scenarios/qpsk_awgn_sweep.yaml --csv output/qpsk.csv
+category: Examples (CLI)
+name: qpsk-awgn-sweep
+seed: 1
+batch_size: 64
+
+blocks:
+  src:   {type: random_bits, params: {n_bits: 2000}}
+  map:   {type: mapper, params: {scheme: psk, order: 4}}
+  awgn:  {type: awgn, params: {mode: ebn0, snr_db: 0.0, signal_power: 1.0}}
+  demap: {type: demapper, params: {method: hard}}
+  ber:   {type: ber_meter, params: {bits_per_symbol: 2}}
+
+chain: [src, map, awgn, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+
+sweep:
+  params:
+    awgn.snr_db: [0, 2, 4, 6, 8, 10]
+  stop: {metric: ber.bit_errors, threshold: 200, max_batches: 300}
+  metrics: [ber.ber, ber.ser, ber.bit_errors]

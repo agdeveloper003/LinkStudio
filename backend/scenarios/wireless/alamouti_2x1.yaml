@@ -1,0 +1,23 @@
+name: Alamouti 2x1 transmit diversity
+category: Wireless
+description: Space-time block coding with two transmit antennas and one receiver gives
+  second-order diversity without channel knowledge at the transmitter. Sweep awgn.snr_db
+  against the MRC L=2 curve shifted by 3 dB.
+seed: 3
+batch_size: 128
+blocks:
+  src: {type: random_bits, params: {n_bits: 400}}
+  map: {type: mapper, params: {scheme: psk, order: 4}}
+  stbc: {type: alamouti_encoder}
+  ch: {type: mimo_channel, params: {n_rx: 1, variation: block}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 12.0}}
+  dec: {type: alamouti_decoder}
+  demap: {type: demapper, params: {method: maxlog}}
+  ber: {type: ber_meter}
+chain: [src, map, stbc, ch, awgn, dec, demap, ber.rx]
+edges:
+  - ch.csi -> dec.csi
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}
+  - {key: dec.out, view: constellation}

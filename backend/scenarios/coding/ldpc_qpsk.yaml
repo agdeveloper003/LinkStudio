@@ -1,0 +1,20 @@
+name: LDPC-coded QPSK
+category: Coding
+description: Rate-1/2 quasi-cyclic LDPC code (n = 768) with soft demapping and min-sum decoding.
+  Sweep awgn.snr_db from 0 to 3 dB to see the waterfall.
+seed: 5
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 1536}}
+  enc: {type: ldpc_encoder}
+  map: {type: mapper, params: {scheme: psk, order: 4}}
+  awgn: {type: awgn, params: {snr_db: 2.0}}
+  demap: {type: demapper, params: {method: exact}}
+  dec: {type: ldpc_decoder}
+  ber: {type: ber_meter}
+chain: [src, enc, map, awgn, demap, dec, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: demap.out, view: histogram}
+  - {key: awgn.out, view: constellation}

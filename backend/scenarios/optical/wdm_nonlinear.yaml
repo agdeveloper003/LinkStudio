@@ -1,0 +1,38 @@
+name: WDM with fiber nonlinearity
+category: Optical
+description: The centre DP-QPSK channel shares 10 x 80 km of fiber with four neighbours at 50 GHz
+  spacing. Cross-phase modulation lowers the MER; set wdm.n_channels to 1 to remove it, or sweep
+  mod.power_dbm to find the optimum launch power. Heavy simulation (split-step at 256 GSa/s).
+seed: 1
+batch_size: 2
+blocks:
+  src: {type: random_bits, params: {n_bits: 6000}}
+  map: {type: mapper, params: {scheme: psk, order: 4, symbol_rate: 32000000000.0}}
+  dmx: {type: stream_demux, params: {n_streams: 2}}
+  tx: {type: pulse_shaper, params: {sps: 8, rolloff: 0.1, span: 32}}
+  mod: {type: iq_modulator, params: {power_dbm: 2.0, linewidth_hz: 0.0}}
+  wdm: {type: wdm_multiplexer, params: {n_channels: 5, spacing_ghz: 50.0}}
+  link: {type: optical_link, params: {n_spans: 10, span_km: 80.0, nonlinear: true, steps_per_km: 0.25}}
+  demux: {type: wdm_demultiplexer}
+  rx: {type: coherent_receiver, params: {lo_linewidth_hz: 0.0}}
+  cdc: {type: cd_compensation}
+  mf: {type: matched_filter, params: {decimate: false}}
+  ds: {type: downsampler, params: {factor: 4}}
+  agc: {type: agc, params: {remove_dc: false}}
+  eq: {type: adaptive_mimo_equalizer}
+  cpr: {type: phase_recovery}
+  mux: {type: stream_mux}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter, params: {skip_bits: 2400}}
+  evm: {type: evm_meter, params: {skip_symbols: 1200}}
+chain: [src, map, dmx, tx, mod, wdm, link, demux, rx, cdc, mf, ds, agc, eq, cpr, mux, demap, ber.rx]
+edges:
+  - dmx.out -> eq.ref
+  - dmx.out -> cpr.ref
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - mux.out -> evm.in
+probes:
+  - {key: wdm.out, view: spectrum}
+  - {key: demux.out, view: spectrum}
+  - {key: cpr.out, view: constellation}

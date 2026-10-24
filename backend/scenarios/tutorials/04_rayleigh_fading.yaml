@@ -1,0 +1,22 @@
+name: 4 - Rayleigh fading
+category: Tutorials
+description: BPSK through a fast Rayleigh channel with coherent zero-forcing equalization.
+  Sweep awgn.snr_db against the BPSK Rayleigh theory and compare with AWGN.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 2000}}
+  map: {type: mapper, params: {scheme: psk, order: 2}}
+  fad: {type: flat_fading, params: {variation: fast}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 15.0}}
+  eq: {type: one_tap_equalizer}
+  demap: {type: demapper, params: {method: maxlog}}
+  ber: {type: ber_meter}
+chain: [src, map, fad, awgn, eq, demap, ber.rx]
+edges:
+  - fad.csi -> eq.csi
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}
+  - {key: eq.out, view: constellation}
+  - {key: fad.csi, view: csi}

@@ -1,0 +1,20 @@
+name: 10G OOK receiver sensitivity
+category: Optical
+description: Back-to-back NRZ-OOK at 10 Gb/s into a thermal-noise-limited PIN receiver. Sweep
+  tx.power_dbm from -26 to -20 dBm to draw the classic sensitivity curve.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 10000000000.0}}
+  tx: {type: intensity_modulator, params: {power_dbm: -22.0, extinction_ratio_db: 10.0}}
+  pd: {type: photodiode, params: {thermal_noise_pa_rthz: 20.0}}
+  agc: {type: agc}
+  dec: {type: line_decoder}
+  ber: {type: ber_meter}
+chain: [src, lc, tx, pd, agc, dec, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: pd.out, view: time}
+  - {key: agc.out, view: constellation}

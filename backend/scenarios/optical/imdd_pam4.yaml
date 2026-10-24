@@ -1,0 +1,26 @@
+name: 56 Gb/s PAM-4 IM/DD optical link
+category: Optical
+description: Directly modulated PAM-4 over standard single-mode fiber with a PIN receiver.
+  Increase the fiber length to see chromatic-dispersion power fading close the eye.
+seed: 1
+batch_size: 8
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: pam, order: 4, symbol_rate: 28000000000.0}}
+  tx: {type: pulse_shaper, params: {shape: rc, sps: 4, rolloff: 0.3}}
+  mod: {type: intensity_modulator, params: {power_dbm: 3.0, extinction_ratio_db: 8.0}}
+  fib: {type: fiber, params: {length_km: 5.0}}
+  opm: {type: optical_power_meter}
+  pd: {type: photodiode}
+  rx: {type: matched_filter, params: {shape: none}}
+  agc: {type: agc}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+chain: [src, map, tx, mod, fib, pd, rx, agc, demap, ber.rx]
+edges:
+  - fib.out -> opm.in
+  - src.out -> ber.tx
+probes:
+  - {key: pd.out, view: eye}
+  - {key: mod.out, view: spectrum}
+  - {key: agc.out, view: constellation}

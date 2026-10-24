@@ -1,0 +1,25 @@
+name: ADSL-like DMT over a telephone pair
+category: Wireline
+description: Discrete multitone with water-filling bit loading over 2 km of 0.4 mm twisted pair.
+  Bit loading assumes 50 dB SNR to leave margin for the NEXT crosstalk; set dmt.snr_db to 60
+  to load more bits and watch the errors appear, or change the loop length.
+seed: 1
+batch_size: 4
+blocks:
+  src: {type: random_bits, params: {n_bits: 12000}}
+  dmt: {type: dmt_modulator, params: {snr_db: 50.0, line_length_m: 2000.0}}
+  ch: {type: copper_line, params: {preset: dsl_0.4mm, length_m: 2000.0}}
+  xt: {type: crosstalk, params: {model: next, n_disturbers: 5}}
+  awgn: {type: awgn, params: {mode: snr, snr_db: 60.0}}
+  rx: {type: dmt_demodulator}
+  ber: {type: ber_meter}
+chain: [src, dmt, ch, xt, awgn, rx.in]
+edges:
+  - ch.csi -> rx.csi
+  - dmt.out -> xt.tx
+  - rx.out -> ber.rx
+  - src.out -> ber.tx
+probes:
+  - {key: dmt.out, view: spectrum}
+  - {key: awgn.out, view: spectrum}
+  - {key: ch.csi, view: csi}

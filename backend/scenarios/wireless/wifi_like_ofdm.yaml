@@ -1,0 +1,38 @@
+name: Wi-Fi-like OFDM (802.11a/g)
+category: Wireless
+description: 20 MHz OFDM with 64 subcarriers, rate-1/2 convolutional code, bit interleaving and
+  16-QAM over an indoor multipath channel, with blind CP-based timing and CFO synchronization
+  and pilot-based channel estimation.
+seed: 1
+batch_size: 8
+blocks:
+  src: {type: random_bits, params: {n_bits: 2994}}
+  enc: {type: conv_encoder}
+  il: {type: interleaver, params: {kind: random, seed: 11}}
+  map: {type: mapper, params: {scheme: qam, order: 16}}
+  ofdm: {type: ofdm_modulator, params: {n_fft: 64, cp_len: 16, n_active: 52, pilot_spacing: 4, subcarrier_spacing: 312500.0, tail_zeros: 80}}
+  ch: {type: multipath, params: {delays: [0, 1, 2, 3, 5], powers_db: [0.0, -2.0, -4.0, -8.0, -12.0]}}
+  tim: {type: timing_offset, params: {delay_samples: 25.0}}
+  cfo: {type: carrier_offset, params: {cfo_hz: 30000.0, random_phase: true}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 14.0}}
+  sync: {type: ofdm_sync}
+  demod: {type: ofdm_demodulator}
+  est: {type: ofdm_channel_estimator, params: {method: ls}}
+  eq: {type: ofdm_equalizer}
+  demap: {type: demapper, params: {method: maxlog}}
+  dil: {type: interleaver, params: {kind: random, seed: 11, inverse: true}}
+  dec: {type: viterbi_decoder}
+  ber: {type: ber_meter}
+chain: [src, enc, il, map, ofdm, ch, tim, cfo, awgn, sync, demod, est]
+edges:
+  - demod.out -> eq.in
+  - est.out -> eq.csi
+  - eq.out -> demap.in
+  - demap.out -> dil.in
+  - dil.out -> dec.in
+  - dec.out -> ber.rx
+  - src.out -> ber.tx
+probes:
+  - {key: ofdm.out, view: spectrum}
+  - {key: est.out, view: csi}
+  - {key: eq.out, view: constellation}

@@ -1,0 +1,277 @@
+\chapter{Wireline communications}\label{ch:wireline}
+
+Copper links (Ethernet over twisted pair, SerDes over backplanes, DSL over telephone loops)
+are real-valued baseband systems. Their channel is a lossy, dispersive transmission line, and
+their noise is dominated by crosstalk, echo and jitter rather than thermal noise.
+\file{phy/wireline.py} models these effects; all its blocks keep real signals real.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=3mm and 4mm,every node/.style={font=\sffamily\scriptsize}]
+  \node[lbl,anchor=east] at (-0.2,0) {SerDes};
+  \node[blockbox,minimum width=11mm] (a1) at (0.6,0) {PAM-4};
+  \node[blockbox,right=of a1,minimum width=11mm] (a2) {pulse};
+  \node[warmbox,right=of a2,minimum width=13mm] (a3) {backplane};
+  \node[warmbox,right=of a3,minimum width=11mm] (a4) {jitter};
+  \node[greenbox,right=of a4,minimum width=11mm] (a5) {CTLE};
+  \node[greenbox,right=of a5,minimum width=11mm] (a6) {FFE+DFE};
+  \foreach \x/\y in {a1/a2,a2/a3,a3/a4,a4/a5,a5/a6} \draw[sig] (\x)--(\y);
+  \node[lbl,anchor=east] at (-0.2,-1.2) {Ethernet};
+  \node[blockbox,minimum width=11mm] (b1) at (0.6,-1.2) {4B/5B};
+  \node[blockbox,right=of b1,minimum width=11mm] (b2) {MLT-3};
+  \node[warmbox,right=of b2,minimum width=13mm] (b3) {Cat5e};
+  \node[warmbox,right=of b3,minimum width=11mm] (b4) {echo};
+  \node[greenbox,right=of b4,minimum width=11mm] (b5) {echo canc.};
+  \node[greenbox,right=of b5,minimum width=11mm] (b6) {DFE};
+  \foreach \x/\y in {b1/b2,b2/b3,b3/b4,b4/b5,b5/b6} \draw[sig] (\x)--(\y);
+  \node[lbl,anchor=east] at (-0.2,-2.4) {DSL};
+  \node[blockbox,minimum width=11mm] (c1) at (0.6,-2.4) {DMT};
+  \node[warmbox,right=of c1,minimum width=11mm] (c2) {loop};
+  \node[warmbox,right=of c2,minimum width=13mm] (c3) {NEXT/FEXT};
+  \node[warmbox,right=of c3,minimum width=11mm] (c4) {impulse};
+  \node[greenbox,right=of c4,minimum width=11mm] (c5) {FFT + FEQ};
+  \node[greenbox,right=of c5,minimum width=11mm] (c6) {demap};
+  \foreach \x/\y in {c1/c2,c2/c3,c3/c4,c4/c5,c5/c6} \draw[sig] (\x)--(\y);
+\end{tikzpicture}
+\caption{Simplified chains of the wireline scenarios (10GBASE-KR / PAM-4 SerDes, 100BASE-TX,
+ADSL/VDSL).}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Line codes}\label{sec:line-codes}
+A line code shapes the spectrum of the transmitted symbols: it removes DC (transformer
+coupling), guarantees transitions (clock recovery) or concentrates energy at low frequency
+(cable loss, emissions). \blk{line_encoder} implements four codes:
+\begin{center}\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+code & rule & levels & PSD with rectangular pulses ($T$ = bit time)\\
+\midrule
+NRZ & $1\to+1$, $0\to-1$ & 2 & $T\sinc^2(fT)$\\
+Manchester & $0\to(+1,-1)$, $1\to(-1,+1)$ & 2 & $T\sinc^2(fT/2)\sin^2(\pi fT/2)$\\
+AMI & $0\to0$, $1\to\pm1$ alternately & 3 & $T\sinc^2(fT)\sin^2(\pi fT)$\\
+MLT-3 & each 1 steps through $0,+1,0,-1$ & 3 & concentrated below $1/(4T)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Manchester and AMI have a spectral null at DC. MLT-3, used by 100BASE-TX, completes a full
+cycle every four ones, so its fundamental is at most a quarter of the bit rate.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=5.5cm,xlabel={frequency / bit rate},ylabel={PSD [dB]},xmin=0,xmax=3,
+  ymin=-40,ymax=3,legend pos=north east]
+  \addplot[th=accent] table[x=f,y=nrz]{\datafile{linecode_psd}};
+  \addplot[th=accent2] table[x=f,y=manchester]{\datafile{linecode_psd}};
+  \addplot[th=accent3] table[x=f,y=ami]{\datafile{linecode_psd}};
+  \addplot[th=accent4] table[x=f,y=mlt3]{\datafile{linecode_psd}};
+  \legend{NRZ,Manchester,AMI,MLT-3}
+\end{axis}
+\end{tikzpicture}
+\caption{Welch spectra of random data through \blk{line_encoder} and a rectangular
+\blk{pulse_shaper}, normalized to the NRZ peak and clipped at $-40$\,dB. Note the DC nulls of
+Manchester and AMI, and Manchester's doubled bandwidth.}
+\label{fig:linecode-psd}
+\end{figure}
+
+\paragraph{Block line codes.}
+\blk{line_block_encoder} implements two block codes.
+\begin{itemize}
+  \item \textbf{4B/5B} maps each nibble to a 5-bit word with at most one leading and two trailing
+  zeros. Long zero runs are thus excluded, at rate $0.8$.
+  \item \textbf{64B/66B} prepends the sync header \code{01} to each 64-bit block and scrambles
+  the payload with the self-synchronizing polynomial $x^{58}+x^{39}+1$,
+  $s[n]=d[n]\oplus s[n-39]\oplus s[n-58]$. The descrambler needs no synchronization, but each
+  channel error produces three errors after descrambling (error multiplication, tested in
+  \file{tests/test_wireline_optical.py}).
+\end{itemize}
+
+% ------------------------------------------------------------------
+\section{The cable as a transmission line}\label{sec:cable}
+A uniform line of length $\ell$, terminated in its characteristic impedance, has transfer
+function $H(f)=e^{-\gamma(f)\ell}$ with propagation constant
+$\gamma=\sqrt{(R+j\omega L)(G+j\omega C)}=\alpha+j\beta$. Two loss mechanisms dominate:
+\begin{itemize}
+  \item the \emph{skin effect}: current crowds near the conductor surface, so $R\propto\sqrt f$
+  and the attenuation $\alpha_s\propto\sqrt f$;
+  \item \emph{dielectric loss}: $G\propto f$ gives $\alpha_d\propto f$.
+\end{itemize}
+In dB per km,
+\begin{equation}
+  \alpha_{\mathrm{dB}}(f)=a\sqrt{f_{\mathrm{MHz}}}+b\,f_{\mathrm{MHz}} .
+\end{equation}
+
+\begin{keypoint}[Causality fixes the phase]
+A causal, minimum-phase channel cannot have an arbitrary attenuation: the log-magnitude and the
+phase form a Hilbert-transform pair. For the skin effect the pair is exact and elementary. The
+function $e^{-k\sqrt{j\omega}}$ is analytic in the right half $s$-plane (it is the
+Laplace-domain response of a diffusion line), and
+\[
+  e^{-k\sqrt{j\omega}}=e^{-k\sqrt{\omega}\,(1+j)/\sqrt2}:
+\]
+the $\sqrt f$ loss comes with an \emph{equal} $\sqrt f$ phase lag. LinkStudio therefore uses
+\begin{equation}
+  H(f)=\exp\!\Big(-\alpha_s(f)\,\ell\,\big(1+j\,\sgn f\big)-\alpha_d(f)\,\ell\Big),
+\end{equation}
+with $\alpha$ in nepers. Dropping the phase would produce a symmetric, non-causal pulse;
+keeping it produces the long causal tail characteristic of copper (\cref{fig:cable}, right),
+which is what makes DSL and Ethernet equalizers work hard.
+\end{keypoint}
+\codeexcerpt{cable}{Cable response with skin-effect phase (\file{wireline.py}).}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=17mm},width=6.9cm,height=5.3cm]
+\nextgroupplot[xmode=log,xlabel={frequency [MHz]},ylabel={insertion loss [dB]},xmin=0.01,xmax=30,
+  ymin=0,ymax=120,legend pos=north west,title={loss}]
+  \addplot[th=accent] table[x=f_mhz,y=dsl1km]{\datafile{cable_loss}};
+  \addplot[th=accent3] table[x=f_mhz,y=dsl2km]{\datafile{cable_loss}};
+  \addplot[th=accent2] table[x=f_mhz,y=dsl3km]{\datafile{cable_loss}};
+  \addplot[th=accent4,dashed] table[x=f_mhz,y=cat5e100m]{\datafile{cable_loss}};
+  \legend{{0.4\,mm, 1\,km},{0.4\,mm, 2\,km},{0.4\,mm, 3\,km},{Cat\,5e, 100\,m}}
+\nextgroupplot[xlabel={time [\si{\micro s}]},ylabel={normalized $h(t)$},xmin=0,xmax=40,ymin=-0.25,ymax=1.05,
+  legend pos=north east,title={pulse response, 0.4\,mm, 2\,km}]
+  \addplot[th=accent] table[x=t_us,y=h]{\datafile{cable_impulse_min}};
+  \addplot[th=black!50,dashed] table[x=t_us,y=h]{\datafile{cable_impulse_zero}};
+  \legend{with skin phase (causal),magnitude only (shifted)}
+\end{groupplot}
+\end{tikzpicture}
+\caption{Left: insertion loss of the presets (\code{cable_response}). Right: impulse response at
+17.664\,MSa/s with the minimum-phase term (used by \blk{copper_line}) and, for comparison, the
+zero-phase response with the same magnitude, shifted by 20\,\si{\micro s}.}
+\label{fig:cable}
+\end{figure}
+
+\begin{incode}
+\blk{copper_line} applies $H(f)$ in the frequency domain, with zero padding to avoid circular
+wrap-around. It publishes the sampled impulse response, truncated at 99.95\,\% of its energy,
+on \code{csi} (\meta{csi_type}\code{="cir"}), for \blk{linear_equalizer} or the DMT FEQ.
+Presets: Cat\,5e, Cat\,6A, 0.4 and 0.5\,mm telephone pairs, RG-6 coax and an FR-4 backplane
+trace.
+\end{incode}
+
+% ------------------------------------------------------------------
+\section{Crosstalk}
+Signals on neighbouring pairs of a binder couple electromagnetically. The ANSI T1.417~\cite{ansi417} 99\,\%
+worst-case models for $N$ disturbers give the coupling power transfer functions
+\begin{align}
+  |H_{\mathrm{NEXT}}(f)|^2&=8.536\times10^{-15}\,N^{0.6}f^{1.5},\\
+  |H_{\mathrm{FEXT}}(f)|^2&=7.744\times10^{-21}\,N^{0.6}\,\ell_{\mathrm{ft}}\,f^2\,|H_{\mathrm{line}}(f)|^2 .
+\end{align}
+NEXT (near end) does not depend on the length and grows with frequency. FEXT (far end) travels
+the whole line and is attenuated by it. \blk{crosstalk} builds the disturbance from the
+spectrum of the neighbour's transmit signal (input \code{tx}, or the signal itself) with random
+phases, shapes it with the model and adds it. The crosstalk-to-signal ratio is reported.
+\codeexcerpt{xtalk}{ANSI crosstalk models.}
+
+% ------------------------------------------------------------------
+\section{Full duplex: hybrid echo and echo cancellation}
+Full-duplex transceivers (1000BASE-T, DSL) send and receive on the same pair. The hybrid
+leaks part of the local transmit signal into the receiver as \emph{echo}, often much stronger
+than the far-end signal. \blk{hybrid_echo} adds the transmit signal filtered by a short echo
+path; \blk{echo_canceller} identifies that path with an NLMS filter driven by the known local
+transmit signal and subtracts its estimate.
+
+NLMS converges at a speed proportional to $\mu$, but leaves an excess mean-square error, the
+misadjustment $\mathcal M\approx\mu/(2-\mu)$ for NLMS. That excess error is noise added to the
+far-end signal. The block therefore uses a \emph{gear shift}: a large step for the first
+\prm{train_samples} samples (fast acquisition, as at link start-up), then a small one (low
+residual). The power reduction after convergence is reported as a metric.
+\codeexcerpt{echo_nlms}{NLMS echo cancellation with gear shifting.}
+
+% ------------------------------------------------------------------
+\section{SerDes equalization}\label{sec:dfe}
+\subsection{Continuous-time linear equalizer}
+A CTLE is an analog high-pass with one zero and two poles,
+\begin{equation}
+  H_{\mathrm{CTLE}}(s)=A\,\frac{1+s/\omega_z}{(1+s/\omega_{p1})(1+s/\omega_{p2})},
+\end{equation}
+providing a peaking of about $20\log_{10}(\omega_{p1}/\omega_z)$\,dB that partially inverts the
+channel loss (\cref{fig:ctle}). It amplifies high-frequency noise and crosstalk as well, so it
+is followed by a decision-feedback equalizer.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=10cm,height=5.2cm,xlabel={frequency [GHz]},ylabel={magnitude [dB]},xmin=0,xmax=20,
+  ymin=-25,ymax=15,legend pos=south west]
+  \addplot[th=accent2] table[x=f_ghz,y=channel_db]{\datafile{ctle}};
+  \addplot[th=accent3] table[x=f_ghz,y=ctle_db]{\datafile{ctle}};
+  \addplot[th=accent] table[x=f_ghz,y=total_db]{\datafile{ctle}};
+  \legend{backplane 0.8\,m,CTLE ($f_z{=}3$, $f_{p1}{=}20$, $f_{p2}{=}30$\,GHz),combined}
+  \draw[black!50,dashed] (axis cs:14,-25) -- (axis cs:14,15) node[pos=0.92,left,font=\scriptsize]{Nyquist, 28\,GBd};
+\end{axis}
+\end{tikzpicture}
+\caption{The CTLE keeps the combined response within about 2\,dB up to the Nyquist frequency of
+a 28\,GBd link (\code{cable_response} and \code{CTLE.response}). Beyond it the second pole and
+the growing loss take over.}
+\label{fig:ctle}
+\end{figure}
+
+\subsection{Feed-forward plus decision-feedback equalizer}
+The DFE output is
+\begin{equation}
+  z[n]=\sum_{i=0}^{F-1}w_i\,y[n+D-i]-\sum_{j=1}^{K}b_j\,\hat a[n-j],
+\end{equation}
+where the feedback taps cancel the post-cursor ISI of past decisions $\hat a$. Because past
+decisions are noise-free when correct, the DFE removes ISI \emph{without} noise enhancement,
+unlike a linear equalizer. The price is error propagation: a wrong decision feeds wrong ISI back.
+Both filters adapt jointly with NLMS on the stacked regressor $[\vect u;\hat{\vect a}]$, trained on
+\prm{n_train} known symbols and then decision-directed.
+\codeexcerpt{dfe_loop}{Joint NLMS adaptation of the FFE and the DFE (\blk{dfe_equalizer}).}
+
+\subsection{Jitter}
+Sampling-clock jitter perturbs the sampling instants, $t_n=nT_s+\Delta(n)$, with a random
+(Gaussian, RJ) and a sinusoidal (SJ) component expressed in unit intervals.
+\blk{jitter} resamples the waveform at the perturbed instants with the cubic interpolator; RJ is
+drawn once per symbol and interpolated between symbols. To first order, the error is
+$x'(t)\,\Delta$, which is why steep edges, that is high bandwidth, make jitter costly.
+\codeexcerpt{jitter}{Perturbed sampling instants.}
+
+% ------------------------------------------------------------------
+\section{Discrete multitone (DSL)}\label{sec:dmt}
+\subsection{Real OFDM}
+DMT is OFDM for real baseband channels. Imposing Hermitian symmetry, $X_{N-k}=X_k\conj$, makes
+the IFFT output real. Tones $k=1,\dots,N/2-1$ carry independent QAM symbols; DC and Nyquist are
+unused. The cyclic prefix turns the loop into $N/2-1$ parallel flat channels, as in
+\cref{ch:ofdm}. The demodulator equalizes each tone with one division (FEQ) using the channel's
+impulse response.
+\codeexcerpt{dmt_hermitian}{Per-tone mapping and Hermitian symmetry (\blk{dmt_modulator}).}
+
+\subsection{Bit loading and the SNR gap}
+For uncoded QAM at a target error rate, the achievable bits per tone are well approximated by
+the \emph{gap} formula
+\begin{equation}
+  b_k=\log_2\!\Big(1+\frac{\mathrm{SNR}_k}{\Gamma\,\gamma_m}\Big),
+  \qquad\Gamma\approx9.8\,\mathrm{dB}\ (P_s=10^{-7}),
+\end{equation}
+where $\gamma_m$ is a noise margin~\cite{starr1999}. The block computes the expected
+$\mathrm{SNR}_k$ from the cable model and the AWGN level. With the time-domain power
+$P=2N_{\mathrm{tones}}/N$ and $\sigma^2=P/\mathrm{SNR}$,
+$\mathrm{SNR}_k=|H_k|^2\,\mathrm{SNR}\,N/(2N_{\mathrm{tones}})$. It then rounds $b_k$ down to the
+sizes the mapper supports: 0, 1 (BPSK) or an even number (square QAM).
+\codeexcerpt{waterfill}{Gap-approximation bit loading.}
+
+\begin{pitfall}[Bit loading versus water-filling]
+The transmit PSD is flat; only the bits adapt to the channel. True water-filling would also
+redistribute power, pouring more where the SNR is high. With a flat PSD the loss is small at
+high SNR, but it is a modelling choice to keep in mind.
+\end{pitfall}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=5.4cm,xlabel={tone index $k$ (4.3125\,kHz spacing)},ylabel={bits per tone},
+  xmin=30,xmax=256,ymin=0,ymax=15,legend pos=north east,const plot]
+  \addplot[accent,thick] table[x=tone,y=bits1km]{\datafile{dmt_bits}};
+  \addplot[accent3,thick] table[x=tone,y=bits2km]{\datafile{dmt_bits}};
+  \addplot[accent2,thick] table[x=tone,y=bits3km]{\datafile{dmt_bits}};
+  \legend{1\,km (\dmtrateA\,Mb/s),2\,km (\dmtrateB\,Mb/s),3\,km (\dmtrateC\,Mb/s)}
+\end{axis}
+\end{tikzpicture}
+\caption{Bit loading of \blk{dmt_modulator} on a 0.4\,mm loop (ADSL downstream tones 33--255,
+50\,dB SNR, 9.8\,dB gap, 3\,dB margin). Data rates are those reported by the block.}
+\label{fig:dmt}
+\end{figure}

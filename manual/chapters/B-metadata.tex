@@ -1,0 +1,38 @@
+\chapter{Metadata keys}\label{app:metadata}
+
+Metadata travels with every signal (\cref{sec:metadata}). The table lists the keys used by the
+built-in library, the blocks that set them and the blocks that read them.
+
+\begin{center}
+\small
+\begin{longtable}{@{}p{3.7cm}p{4.8cm}p{5.5cm}@{}}
+\toprule
+\textbf{Key} & \textbf{Meaning} & \textbf{Set by / read by}\\
+\midrule
+\endhead
+\meta{bits_per_symbol} & bits per constellation symbol $k$ & mapper, line encoder / awgn ($E_b/N_0$), BER meter\\
+\meta{constellation} & the \code{Constellation} object & mapper / demapper, equalizers (decisions), PLL, BPS, AGC, WDM\\
+\meta{code_rate} & cumulative code rate $R$ (with tails, CRC, puncturing) & encoders, CRC, puncturer, block line codes / awgn\\
+\meta{power} & nominal mean power per sample & mapper, pulse shaper, OFDM/DMT, optical blocks / awgn (SNR reference), AGC, OSNR\\
+\meta{sps} & samples per symbol $N_{\mathrm{sps}}$ & pulse shaper, rate changers, OFDM ($N/N_{\mathrm{act}}$) / awgn, matched filter, timing recovery, equalizers\\
+\meta{delay} & known processing delay in samples & pulse shaper, matched filter, FIR / matched filter, timing recovery, MIMO equalizer\\
+\meta{pulse_taps} & transmit pulse & pulse shaper / matched filter, WDM multiplexer\\
+\meta{n_symbols} & symbols per frame & mapper, pulse shaper, preamble, MIMO / matched filter, equalizers\\
+\meta{noise_var} & noise variance per complex sample or symbol (scalar or array) & awgn, equalizers, detectors, photodiode, coherent receiver / soft demapper, AGC, MIMO detector\\
+\meta{spatial_rate} & streams per channel use $N_s$ & stream demux / awgn\\
+\meta{csi_type} & form of CSI: \code{gain}, \code{cir}, \code{cir_tv}, \code{freq}, \code{mimo} & channels, estimators / equalizers, detectors\\
+\meta{ofdm} & \code{OFDMLayout} & OFDM modulator / demodulator, estimator, equalizer, sync\\
+\meta{n_data_symbols}, \meta{data_power} & payload size and data-subcarrier power & OFDM modulator / OFDM equalizer\\
+\meta{preamble}, \meta{n_payload_symbols} & preamble sequence and payload size & preamble / frame sync\\
+\meta{punctured_length} & mother-code length before puncturing & puncturer / depuncturer\\
+\meta{line_code} & line code name & line encoder / AGC (target power)\\
+\meta{dmt}, \meta{n_bits} & DMT modulator and payload size & DMT modulator / DMT demodulator\\
+\meta{optical} & the signal is an optical field & optical transmitters / detectors\\
+\meta{wavelength_nm} & carrier wavelength & optical transmitters / fiber, EDFA, CD and FO compensation\\
+\meta{cd_ps_nm} & accumulated dispersion $D\ell$ & fiber, link / CD compensation\\
+\meta{cd_compensated_ps_nm} & dispersion removed so far & CD compensation / FO compensation (bulk-delay fix)\\
+\meta{ase_psd} & accumulated ASE density per polarization & EDFA, link, fiber / OSNR metrics\\
+\meta{wdm} & channel count and spacing & WDM multiplexer / WDM demultiplexer\\
+\bottomrule
+\end{longtable}
+\end{center}

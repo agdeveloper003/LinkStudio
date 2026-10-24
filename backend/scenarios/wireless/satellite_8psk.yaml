@@ -1,0 +1,29 @@
+name: Satellite link, 8-PSK with TWTA
+category: Wireless
+description: DVB-S2-like 8-PSK with RRC 0.35 through a traveling-wave tube amplifier (Saleh model)
+  driven near saturation. The AM/PM rotation is removed by the decision-directed PLL. Lower
+  pa.input_backoff_db to see the nonlinear distortion grow.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 3000}}
+  map: {type: mapper, params: {scheme: psk, order: 8, symbol_rate: 30000000.0}}
+  tx: {type: pulse_shaper, params: {shape: rrc, sps: 4, rolloff: 0.35, span: 12}}
+  pa: {type: power_amplifier, params: {model: saleh, input_backoff_db: 6.0}}
+  pn: {type: phase_noise, params: {linewidth_hz: 200.0}}
+  awgn: {type: awgn, params: {mode: esn0, snr_db: 16.0}}
+  mf: {type: matched_filter}
+  agc: {type: agc, params: {remove_dc: false}}
+  cr: {type: carrier_recovery}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+  evm: {type: evm_meter}
+chain: [src, map, tx, pa, pn, awgn, mf, agc, cr, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - cr.out -> evm.in
+probes:
+  - {key: pa.out, view: spectrum}
+  - {key: agc.out, view: constellation}
+  - {key: cr.out, view: constellation}

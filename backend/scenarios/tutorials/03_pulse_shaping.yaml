@@ -1,0 +1,22 @@
+name: 3 - Pulse shaping and the eye diagram
+category: Tutorials
+description: QPSK with root-raised-cosine shaping and a matched filter. Change tx.rolloff and
+  watch the spectrum width, or add a timing offset to close the eye.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 2000}}
+  map: {type: mapper, params: {scheme: psk, order: 4, symbol_rate: 1000000.0}}
+  tx: {type: pulse_shaper, params: {shape: rrc, sps: 8, rolloff: 0.35, span: 12}}
+  tim: {type: timing_offset, params: {delay_samples: 0.0}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 12.0}}
+  mf: {type: matched_filter}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+chain: [src, map, tx, tim, awgn, mf, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: tx.out, view: spectrum}
+  - {key: awgn.out, view: eye}
+  - {key: mf.out, view: constellation}

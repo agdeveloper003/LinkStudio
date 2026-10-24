@@ -1,0 +1,163 @@
+\chapter{Fading channels and equalization}\label{ch:fading}
+
+% ------------------------------------------------------------------
+\section{The multipath channel}
+In a radio channel the transmitted signal reaches the receiver along many paths with
+different delays $\tau_l$, complex gains and Doppler shifts. The low-pass equivalent channel is
+a linear time-varying filter,
+\begin{equation}
+  y(t)=\sum_l a_l(t)\,x(t-\tau_l)+w(t),\qquad h(\tau;t)=\sum_l a_l(t)\,\delta(\tau-\tau_l).
+\end{equation}
+Two scales characterize it:
+\begin{itemize}
+  \item the \emph{delay spread} $\sigma_\tau$, whose inverse is the coherence bandwidth
+  $B_c\approx1/(5\sigma_\tau)$;
+  \item the maximum Doppler shift $f_D=v f_c/c$, whose inverse sets the coherence time
+  $T_c\approx0.423/f_D$.
+\end{itemize}
+A signal of bandwidth $B\ll B_c$ sees \emph{flat} fading (a single complex gain). If $B\gtrsim
+B_c$ the fading is frequency selective and causes ISI.
+
+% ------------------------------------------------------------------
+\section{Rayleigh and Rician fading}
+When a path is the superposition of many unresolved scatterers with random phases, the
+central limit theorem makes its gain circular complex Gaussian, $h\sim\CN(0,1)$. The envelope
+$|h|$ is then Rayleigh distributed and the power $|h|^2$ exponential. A line-of-sight
+component of relative power $K$ (the Rician factor) adds a deterministic term:
+\begin{equation}
+  h=\sqrt{\frac{K}{K+1}}\,e^{j\theta_0}+\sqrt{\frac{1}{K+1}}\,h_{\mathrm{Ray}},\qquad \E|h|^2=1 .
+\end{equation}
+
+\subsection{Time correlation: the Clarke--Jakes model}
+For isotropic scattering in the horizontal plane, a path arriving at angle $\alpha$ is shifted
+by $f_D\cos\alpha$. Averaging over a uniform $\alpha$ gives~\cite{clarke1968} the autocorrelation and the U-shaped
+Doppler spectrum
+\begin{equation}
+  R_h(\tau)=\E\big[h(t+\tau)h\conj(t)\big]=J_0(2\pi f_D\tau),\qquad
+  S_h(f)=\frac{1}{\pi f_D\sqrt{1-(f/f_D)^2}},\ |f|<f_D .
+  \label{eq:jakes}
+\end{equation}
+LinkStudio generates it with a random-phase sum of sinusoids:
+\begin{equation}
+  h[n]=\frac{1}{\sqrt{N}}\sum_{i=1}^{N}e^{\,j(2\pi f_D\cos\alpha_i\,n/f_s+\phi_i)},\qquad
+  \alpha_i,\phi_i\sim\mathcal U[0,2\pi).
+\end{equation}
+Each term has autocorrelation $\E_\alpha e^{j2\pi f_D\cos\alpha\,\tau}=J_0(2\pi f_D\tau)$, so
+the sum reproduces \cref{eq:jakes} exactly in expectation. Its first-order statistics approach
+Gaussian as $N$ grows (16 sinusoids by default).
+\codeexcerpt{sos}{Sum-of-sinusoids Rayleigh process (\file{channel/fading.py}).}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=17mm},width=6.9cm,height=5cm]
+\nextgroupplot[xlabel={$f_D\tau$},ylabel={$R_h(\tau)$},xmin=0,xmax=3,ymin=-0.5,ymax=1.05,
+  legend pos=north east,title={autocorrelation}]
+  \addplot[th=accent] table[x=lag,y=theory]{\datafile{jakes_acf}};
+  \addplot[sim=accent2,mark size=1.1pt] table[x=lag,y=sim]{\datafile{jakes_acf}};
+  \legend{$J_0(2\pi f_D\tau)$,simulated}
+\nextgroupplot[xlabel={$f_D t$},ylabel={$|h|^2$ [dB]},xmin=0,xmax=4,ymin=-30,ymax=10,
+  title={fading envelope}]
+  \addplot[accent,thin] table[x=t,y=env_db]{\datafile{jakes_envelope}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Left: autocorrelation of \code{sum_of_sinusoids} (400 realizations, $f_D/f_s=0.01$)
+against \cref{eq:jakes}. Right: a realization; fades deeper than 20\,dB occur about once per
+wavelength travelled.}
+\label{fig:jakes}
+\end{figure}
+
+\begin{incode}
+\blk{flat_fading} multiplies the input by $h$ and publishes the true gains on its \code{csi}
+output (\meta{csi_type}\code{="gain"}). Three time-variation modes are available:
+\begin{itemize}
+  \item \prm{block}: one coefficient per frame (quasi-static);
+  \item \prm{fast}: independent per sample (ideal interleaving);
+  \item \prm{jakes}: correlated with Doppler \prm{doppler_hz}; needs \code{fs}.
+\end{itemize}
+\end{incode}
+\codeexcerpt{flat_fading}{Fading generation and the Rician line-of-sight term.}
+
+% ------------------------------------------------------------------
+\section{Tapped delay lines and 3GPP profiles}
+\blk{multipath} implements the discrete model
+$y[n]=\sum_{l}h_l[n]\,x[n-d_l]$ with integer sample delays $d_l=\mathrm{round}(\tau_lf_s)$.
+Taps falling on the same sample have their powers added, and the profile is normalized to unit
+total power. Taps are Rayleigh (or static with \prm{fading}\code{=false}), constant per frame or
+each with an independent Jakes process. The 3GPP extended models of TS~36.104~\cite{3gpp36104} are built in:
+
+\begin{center}\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Model & delays [ns] & relative powers [dB]\\
+\midrule
+EPA & 0, 30, 70, 90, 110, 190, 410 & 0, $-1$, $-2$, $-3$, $-8$, $-17.2$, $-20.8$\\
+EVA & 0, 30, 150, 310, 370, 710, 1090, 1730, 2510 & 0, $-1.5$, $-1.4$, $-3.6$, $-0.6$, $-9.1$, $-7$, $-12$, $-16.9$\\
+ETU & 0, 50, 120, 200, 230, 500, 1600, 2300, 5000 & $-1$, $-1$, $-1$, 0, 0, 0, $-3$, $-5$, $-7$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Their RMS delay spreads are 43, 357 and 991\,ns. The channel impulse response is published
+on \code{csi}: \meta{csi_type}\code{="cir"} with shape $(B,L)$ for block fading, or
+\code{"cir_tv"} with shape $(B,L,n)$ for time-varying taps.
+
+% ------------------------------------------------------------------
+\section{Error probability with fading}\label{sec:rayleigh-ber}
+With coherent detection and perfect channel knowledge, the instantaneous SNR of BPSK in flat
+fading is $\gamma=|h|^2E_b/N_0$, exponentially distributed with mean $\bar\gamma$. Averaging
+the AWGN error probability over it gives
+\begin{equation}
+  \bar P_b=\int_0^\infty\Q\big(\sqrt{2\gamma}\big)\,\frac{e^{-\gamma/\bar\gamma}}{\bar\gamma}\,d\gamma
+  =\frac12\left(1-\sqrt{\frac{\bar\gamma}{1+\bar\gamma}}\right)\ \xrightarrow{\ \bar\gamma\to\infty\ }\ \frac{1}{4\bar\gamma}.
+  \label{eq:rayleigh-ber}
+\end{equation}
+The error rate now falls only as $1/\mathrm{SNR}$ instead of exponentially: 10\,dB more SNR
+buys one decade of BER. Diversity, the subject of \cref{sec:diversity}, restores a steeper
+slope. \code{ber_rayleigh} performs the same average numerically for any AWGN curve.
+\Cref{fig:diversity} compares \cref{eq:rayleigh-ber} with the chain
+\blk{flat_fading}$\to$\blk{awgn}$\to$\blk{one_tap_equalizer}.
+
+% ------------------------------------------------------------------
+\section{Equalization}\label{sec:equalization}
+\subsection{One-tap equalization}
+For flat fading, $y=hs+w$, and dividing by the known gain gives $\hat s=s+w/h$. The noise
+variance becomes $\sigma^2/|h|^2$ symbol by symbol, and \blk{one_tap_equalizer} writes exactly
+this array to \meta{noise_var}, so the soft demapper weights faded symbols correctly. The
+\prm{phase} variant only derotates, which is sufficient for PSK.
+
+\subsection{Linear FIR equalizers designed from the channel}
+For a frequency-selective channel with impulse response $\vect h=(h_0,\dots,h_{L-1})$, a
+linear equalizer $\vect w$ of $N$ taps produces the combined response $\mat H\vect w$, where
+$\mat H$ is the $(N+L-1)\times N$ convolution matrix of $\vect h$. Zero forcing asks the combined
+response to approximate a unit impulse $\vect e_d$ at decision delay $d$. The MMSE design adds
+the noise power $\sigma^2$ as a regularizer:
+\begin{equation}
+  \vect w_d=\argmin_{\vect w}\ \|\mat H\vect w-\vect e_d\|^2+\lambda\|\vect w\|^2
+  =(\mat H\Her\mat H+\lambda\mat I)^{-1}\mat H\Her\vect e_d,
+  \qquad\lambda=\begin{cases}\sigma^2&\text{MMSE}\\ \approx0&\text{ZF.}\end{cases}
+\end{equation}
+All delays are solved at once, since the columns of $(\mat H\Her\mat H+\lambda\mat
+I)^{-1}\mat H\Her$ are the solutions for every $d$. The delay with the largest useful gain
+$(\mat H\vect w_d)_d$ is selected. The output is then scaled by $1/(\mat H\vect w_d)_d$ to remove
+the MMSE bias, and the noise variance becomes $\sigma^2\|\vect w\|^2$.
+\codeexcerpt{linear_eq}{Least-squares design of ZF/MMSE equalizers with delay selection (\blk{linear_equalizer}).}
+
+\subsection{Adaptive equalization: LMS}
+When the channel is unknown, the equalizer $z[n]=\vect w\Her\vect u[n]$, with
+$\vect u[n]=(y[n],y[n-1],\dots)$, can minimize $\E|d[n]-z[n]|^2$ by stochastic gradient
+descent. The instantaneous gradient with respect to $\vect w\conj$ is $-\vect u\,e\conj$ with
+$e=d-z$, giving the LMS update and its normalized version:
+\begin{equation}
+  \vect w\leftarrow\vect w+\mu\,\vect u[n]\,e\conj[n],\qquad
+  \mu_{\mathrm{NLMS}}=\frac{\tilde\mu}{\|\vect u[n]\|^2+\epsilon},\quad 0<\tilde\mu<2 .
+\end{equation}
+The reference $d[n]$ is the known training sequence for the first \prm{n_train} symbols and the
+nearest constellation point afterwards (decision-directed mode). The residual MSE measured after
+training is written to \meta{noise_var}.
+\codeexcerpt{lms_loop}{The (N)LMS loop runs over time but processes all frames of the batch at once.}
+
+\begin{keypoint}[ZF versus MMSE]
+Zero forcing inverts spectral nulls and amplifies the noise there. MMSE balances ISI against
+noise and tends to ZF at high SNR. The decision-feedback equalizer of \cref{sec:dfe} removes
+post-cursor ISI without noise enhancement, at the cost of error propagation.
+\end{keypoint}

@@ -1,0 +1,21 @@
+name: Punctured convolutional code (rate 3/4)
+category: Coding
+description: The K=7 rate-1/2 mother code is punctured to rate 3/4 (IEEE 802.11 pattern). The
+  depuncturer inserts erasures before soft Viterbi decoding.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 1002}}
+  enc: {type: conv_encoder}
+  punc: {type: puncturer}
+  map: {type: mapper, params: {scheme: psk, order: 4}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 5.0}}
+  demap: {type: demapper, params: {method: maxlog}}
+  dpunc: {type: depuncturer}
+  dec: {type: viterbi_decoder}
+  ber: {type: ber_meter}
+chain: [src, enc, punc, map, awgn, demap, dpunc, dec, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}

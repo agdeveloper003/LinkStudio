@@ -1,0 +1,23 @@
+name: 2x2 MIMO spatial multiplexing
+category: Wireless
+description: Two 16-QAM streams over a Rayleigh MIMO channel. Try the zf, mmse and ml detectors
+  and the antenna correlation.
+seed: 4
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: qam, order: 16}}
+  dmx: {type: stream_demux, params: {n_streams: 2}}
+  ch: {type: mimo_channel, params: {n_rx: 2, variation: fast}}
+  awgn: {type: awgn, params: {snr_db: 16.0}}
+  det: {type: mimo_detector, params: {method: mmse}}
+  mux: {type: stream_mux}
+  demap: {type: demapper, params: {method: maxlog}}
+  ber: {type: ber_meter}
+chain: [src, map, dmx, ch, awgn, det, mux, demap, ber.rx]
+edges:
+  - ch.csi -> det.csi
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}
+  - {key: mux.out, view: constellation}

@@ -1,0 +1,23 @@
+name: VDSL-like DMT with far-end crosstalk
+category: Wireline
+description: A wider DMT band (1024-point FFT, 8.8 MHz sampling) over 500 m of 0.5 mm pair, with
+  far-end crosstalk from 10 neighbouring lines. Short loops reach tens of Mb/s.
+seed: 1
+batch_size: 2
+blocks:
+  src: {type: random_bits, params: {n_bits: 30000}}
+  dmt: {type: dmt_modulator, params: {n_fft: 1024, cp_len: 80, first_tone: 33, last_tone: 511, sample_rate: 8832000.0, snr_db: 45.0, line_preset: dsl_0.5mm, line_length_m: 500.0}}
+  ch: {type: copper_line, params: {preset: dsl_0.5mm, length_m: 500.0}}
+  xt: {type: crosstalk, params: {model: fext, n_disturbers: 10, preset: dsl_0.5mm, length_m: 500.0}}
+  awgn: {type: awgn, params: {mode: snr, snr_db: 60.0}}
+  rx: {type: dmt_demodulator}
+  ber: {type: ber_meter}
+chain: [src, dmt, ch, xt, awgn, rx.in]
+edges:
+  - ch.csi -> rx.csi
+  - dmt.out -> xt.tx
+  - rx.out -> ber.rx
+  - src.out -> ber.tx
+probes:
+  - {key: dmt.out, view: spectrum}
+  - {key: awgn.out, view: spectrum}

@@ -1,0 +1,22 @@
+name: 6 - ISI and adaptive equalization
+category: Tutorials
+description: A static three-path channel smears QPSK symbols together. The NLMS equalizer learns
+  the inverse from 200 training symbols and then tracks with its own decisions.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: psk, order: 4}}
+  ch: {type: multipath, params: {delays: [0, 1, 2], powers_db: [0.0, -2.0, -6.0], fading: false}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 14.0}}
+  eq: {type: lms_equalizer, params: {n_taps: 15}}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter, params: {skip_bits: 400}}
+chain: [src, map, ch, awgn, eq, demap, ber.rx]
+edges:
+  - map.out -> eq.ref
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}
+  - {key: eq.out, view: constellation}
+  - {key: ch.csi, view: csi}

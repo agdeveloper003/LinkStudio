@@ -1,0 +1,150 @@
+\chapter{Graphical editor, API and command line}\label{ch:interfaces}
+
+\section{The graphical editor}
+\code{python -m linkstudio serve} starts the web server and opens the editor in the browser.
+\Cref{fig:gui-layout} shows its layout.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\sffamily\scriptsize]
+  \draw[black!40,fill=black!3,rounded corners=2pt] (0,0) rectangle (14,8.2);
+  % top bar
+  \draw[accent,fill=soft] (0.1,7.5) rectangle (13.9,8.1);
+  \node[anchor=west] at (0.2,7.8) {\textbf{scenario name} \quad New \quad Save \quad Save as \quad Undo/Redo \quad Layout \quad Export .py \quad batch \quad seed};
+  \node[anchor=east,accent3] at (13.8,7.8) {\textbf{valid}};
+  % palette
+  \draw[accent4,fill=accent4!6] (0.1,2.9) rectangle (2.6,7.4);
+  \node[align=center] at (1.35,6.95) {\textbf{Blocks}\\search};
+  \foreach \y/\t in {6.2/source,5.75/modulation,5.3/waveform,4.85/channel,4.4/sync,3.95/coding,3.5/optical}
+    \node[draw=black!25,fill=white,minimum width=2.1cm,minimum height=3.5mm] at (1.35,\y) {\t};
+  % canvas
+  \draw[black!30,fill=white] (2.7,2.9) rectangle (10.6,7.4);
+  \node at (6.65,7.15) {\textbf{Canvas}};
+  \foreach \x/\t/\c in {3.4/src/kbits,4.9/map/ksym,6.4/awgn/ksym,7.9/demap/kllr,9.6/ber/gray}
+    \node[draw=\c,fill=\c!10,rounded corners=1pt,minimum width=1.1cm,minimum height=6mm] (n\t) at (\x,5.2) {\t};
+  \draw[->,kbits,thick] (nsrc)--(nmap); \draw[->,ksym,thick] (nmap)--(nawgn);
+  \draw[->,ksym,thick] (nawgn)--(ndemap); \draw[->,kllr,thick] (ndemap)--(nber);
+  \draw[->,kbits,thick] (nsrc.south) -- ++(0,-0.6) -| (nber.south);
+  \draw[black!30,fill=black!5] (9.2,3.0) rectangle (10.5,3.8); \node at (9.85,3.4) {minimap};
+  % inspector
+  \draw[accent2,fill=accent2!5] (10.7,2.9) rectangle (13.9,7.4);
+  \node[align=left,anchor=north west] at (10.8,7.3) {\textbf{Inspector}\\[2pt] name\\ parameters (forms,\\ sliders, \texttt{auto})\\ probes to show\\[3pt] Duplicate \;\; Delete\\[3pt] shortcuts};
+  % dock
+  \draw[accent3,fill=accent3!6] (0.1,0.1) rectangle (13.9,2.8);
+  \node[anchor=north west] at (0.2,2.75) {\textbf{Live} \quad Simulate \quad Sweep};
+  \draw[black!30,fill=white] (0.3,0.3) rectangle (3.0,2.2); \node at (1.65,1.25) {metrics + CI};
+  \foreach \x/\t in {3.2/constellation,5.9/spectrum,8.6/eye diagram,11.3/BER curve}
+    { \draw[black!30,fill=white] (\x,0.3) rectangle ++(2.5,1.9); \node at (\x+1.25,1.25) {\t}; }
+\end{tikzpicture}
+\caption{Layout of the editor: palette, canvas, inspector and the run dock with its three
+modes.}
+\label{fig:gui-layout}
+\end{figure}
+
+\paragraph{Editing.}
+\begin{itemize}
+  \item \textbf{Adding blocks:} drag a block from the palette or double-click it.
+  \item \textbf{Connecting:} drag from an output handle (right side) to an input handle (left
+  side). Handle colours are the signal kinds of \cref{tab:kinds}; incompatible connections are
+  refused, and dashed handles are optional inputs.
+  \item \textbf{Inspector:} parameter forms are generated from each block's schema. Bounded and
+  dB-valued parameters get sliders, and \code{auto} leaves a value to upstream metadata.
+  \item \textbf{Shortcuts:} Ctrl+Z/Y (undo/redo), Ctrl+C/V/D (copy, paste, duplicate, with
+  internal edges), Ctrl+L (automatic layout), Ctrl+S (save), Ctrl+O (scenario browser).
+\end{itemize}
+The run buttons are disabled while the graph is invalid, and the validator's message is shown
+next to them.
+
+\paragraph{Modes.}
+\begin{description}[font=\sffamily\bfseries]
+  \item[Live] runs the chain continuously at 1--30 batches per second and streams every probe.
+  Parameter changes are applied between batches and the meters restart, so the effect of a
+  slider is visible immediately. Structural edits restart the session.
+  \item[Simulate] runs a Monte-Carlo job in the background, either for a fixed number of
+  batches or until a metric reaches a threshold. It shows the final metrics (BER with its 95\,\%
+  confidence interval) and the probes of the last batch.
+  \item[Sweep] runs one or two nested parameter sweeps and plots any metric, with an optional
+  theoretical curve. Curves can be kept and overlaid, and the results exported as CSV or PNG.
+\end{description}
+
+\paragraph{Probes and views.}
+Ticking an output in the inspector adds a scope for it. The available views depend on the
+signal kind.
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Kind & Views\\
+\midrule
+\kind{SYMBOLS} & constellation, time, spectrum\\
+\kind{SAMPLES} & spectrum (Welch), constellation, eye diagram, time\\
+\kind{GRID} & constellation, resource-grid magnitude\\
+\kind{CSI} & impulse / frequency response\\
+\kind{LLR} & histogram, time\\
+\kind{BITS} & time\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{The HTTP and WebSocket API}
+The editor talks to the FastAPI application in \file{linkstudio/api/app.py}. Everything it does
+can also be scripted.
+
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+Method & Path & Purpose\\
+\midrule
+GET  & \code{/api/blocks} & block catalogue: documentation, ports, parameter JSON Schema\\
+GET  & \code{/api/scenarios} & scenario list with name, category, description, block count\\
+GET/PUT & \code{/api/scenarios/{path}} & load / save a scenario in editor format\\
+POST & \code{/api/validate} & validate an editor graph; returns errors and port kinds\\
+POST & \code{/api/layout} & automatic layout of the blocks\\
+POST & \code{/api/export/python} & standalone Python script equivalent to the graph\\
+POST & \code{/api/jobs} & start a simulate or sweep job\\
+GET  & \code{/api/jobs/{id}} & job status, progress, partial and final results\\
+POST & \code{/api/jobs/{id}/cancel} & cancel a job\\
+WS   & \code{/api/live} & interactive live mode\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Jobs run in a thread pool (\file{api/jobs.py}). Their results contain JSON-safe metrics (NaN
+becomes \code{null}), the probe data of the last batch and, for sweeps of a single parameter
+whose value matches a known modulation, theoretical BER curves. A failed job reports the
+message \code{failed} with the details in a separate \code{detail} field.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=-0.62cm,font=\sffamily\scriptsize]
+  \node[blockbox] (c) at (0,0) {browser};
+  \node[blockbox] (s) at (7,0) {server (\code{/api/live})};
+  \draw[black!40] (0,0.6) -- (0,10.5); \draw[black!40] (7,0.6) -- (7,10.5);
+  \draw[->] (0,1.5) -- node[above]{\code{start} \{graph, rate\}} (7,1.5);
+  \draw[<-] (0,2.5) -- node[above]{\code{started}} (7,2.5);
+  \draw[<-,accent3] (0,3.6) -- node[above]{\code{frame} \{batch, metrics, probes, step\_ms\}} (7,3.6);
+  \draw[<-,accent3] (0,4.6) -- node[above]{\code{frame}} (7,4.6);
+  \draw[->,accent2] (0,5.6) -- node[above]{\code{set_param} \{path, value\}} (7,5.6);
+  \node[anchor=west,note] at (7.1,6.3) {applied before the next batch;\\meters restart};
+  \draw[<-,accent3] (0,7.0) -- node[above]{\code{frame}} (7,7.0);
+  \draw[->] (0,8.0) -- node[above]{\code{probes} / \code{rate} / \code{reset}} (7,8.0);
+  \draw[->] (0,9.2) -- node[above]{\code{stop}} (7,9.2);
+  \draw[<-] (0,10.2) -- node[above]{\code{stopped}} (7,10.2);
+\end{tikzpicture}
+\caption{Message flow of the live mode. The server steps the simulation in a worker thread and
+paces frames to the requested rate.}
+\end{figure}
+
+\section{Command line}
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\code{python -m linkstudio blocks [--category C]} & list block types\\
+\code{python -m linkstudio describe TYPE} & ports, parameters and documentation of a block\\
+\code{python -m linkstudio run FILE.yaml [--csv OUT]} & run a scenario (simulation or sweep)\\
+\code{python -m linkstudio serve [--host H] [--port P] [--no-browser]} & start the editor\\
+\code{python scripts/main.py [--quick]} & run all demos with theory checks\\
+\bottomrule
+\end{tabularx}
+\end{center}
+The demo scripts in \file{scripts/} (one per subsystem) are short, readable examples of the
+Python API. Each prints simulated values next to theory and returns a pass/fail status.

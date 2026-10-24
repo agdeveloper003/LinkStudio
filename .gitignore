@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+
+# Simulator output
+backend/output/
+
+# Frontend (dist is committed so the UI works without Node)
+frontend/node_modules/
+
+# LaTeX build files (the PDF is committed)
+manual/*.aux
+manual/*.log
+manual/*.out
+manual/*.toc
+manual/*.fls
+manual/*.fdb_latexmk
+manual/*.synctex.gz
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

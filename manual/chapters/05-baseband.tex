@@ -1,0 +1,181 @@
+\chapter[Baseband signal model, noise and Monte-Carlo estimation]{Baseband signal model, noise and\\ Monte-Carlo estimation}\label{ch:baseband}
+
+Every chapter of Part II relies on three conventions:
+\begin{itemize}
+  \item a signal is represented by its sampled complex envelope;
+  \item noise is circular complex Gaussian with a variance tied to $N_0$;
+  \item performance is estimated by counting errors.
+\end{itemize}
+This chapter makes the three precise.
+
+% ------------------------------------------------------------------
+\section{The complex envelope}
+A real band-pass signal centred on the carrier $f_c$ can always be written as
+\begin{equation}
+  s(t)=\Re\!\left\{x(t)\,e^{j2\pi f_c t}\right\}=x_I(t)\cos 2\pi f_c t-x_Q(t)\sin 2\pi f_c t,
+  \qquad x(t)=x_I(t)+j\,x_Q(t),
+  \label{eq:envelope}
+\end{equation}
+where $x(t)$ is the \emph{complex envelope}. If $s$ occupies $|f\pm f_c|<B/2$, then $x$ is a
+low-pass signal of bandwidth $B/2$. It can be sampled at $f_s\ge B$, whatever the carrier
+frequency. Linear time-invariant band-pass systems act on $x$ through their low-pass
+equivalent impulse response. A carrier frequency error $\Delta f$ becomes a rotation
+$x(t)e^{j2\pi\Delta f t}$, and an oscillator phase error $\phi(t)$ becomes $x(t)e^{j\phi(t)}$.
+
+\begin{incode}
+All \kind{SYMBOLS} and \kind{SAMPLES} signals are sampled complex envelopes
+$x[n]=x(n/f_s)$ with \code{Signal.fs}$=f_s$. Two exceptions are worth noting:
+\begin{itemize}
+  \item wireline and IM/DD electrical signals are \emph{real} baseband signals ($x_Q\equiv0$),
+  and the blocks keep their arrays real;
+  \item optical fields are envelopes around the optical carrier, scaled in $\sqrt{\mathrm{W}}$
+  (\cref{ch:optical}).
+\end{itemize}
+Powers are \emph{envelope} powers, $P=\E|x[n]|^2$. The factor $\tfrac12$ relating envelope and
+band-pass powers cancels in every SNR, so it is never applied.
+\end{incode}
+
+% ------------------------------------------------------------------
+\section{Additive white Gaussian noise}\label{sec:awgn}
+\subsection{From $N_0$ to a sample variance}
+Thermal noise at the receiver input is modelled as white with two-sided band-pass power
+spectral density $N_0/2$. Its complex envelope $w(t)$ is circular complex Gaussian with
+two-sided PSD $N_0$ (in envelope units). Observed through any filter of noise bandwidth $f_s$
+and sampled at $f_s$, it gives independent samples
+\begin{equation}
+  w[n]\sim\CN(0,\sigma^2),\qquad \sigma^2=N_0 f_s,
+  \qquad \E\big[(\Re w)^2\big]=\E\big[(\Im w)^2\big]=\sigma^2/2 .
+  \label{eq:sample-variance}
+\end{equation}
+The code works in units where the sample period is the time unit, so $N_0$ and $\sigma^2$
+coincide numerically. The metadata key \meta{noise_var} is $\sigma^2$, the noise variance per
+complex sample (or per symbol after matched filtering).
+
+\subsection{SNR definitions}
+Let $P$ be the signal power per sample and $N_{\mathrm{sps}}$ the number of samples per symbol.
+The energy per symbol is $E_s=P\,N_{\mathrm{sps}}T_s$ and the noise PSD is
+$N_0=\sigma^2 T_s$, so
+\begin{equation}
+  \frac{E_s}{N_0}=\frac{P\,N_{\mathrm{sps}}}{\sigma^2}.
+  \label{eq:esn0}
+\end{equation}
+A symbol carries $k=\log_2 M$ coded bits. A code of rate $R$ and $N_s$ spatially multiplexed
+streams turn these into $k R N_s$ information bits per channel use, so
+\begin{equation}
+  \frac{E_b}{N_0}=\frac{E_s}{k R N_s N_0}
+  \quad\Longrightarrow\quad
+  \sigma^2=\frac{P\,N_{\mathrm{sps}}}{(E_b/N_0)\,k R N_s}.
+  \label{eq:ebn0}
+\end{equation}
+The \blk{awgn} block implements the three definitions of \cref{tab:snr-modes}.
+$N_{\mathrm{sps}}$, $k$, $R$ and $N_s$ are read from the metadata set by the pulse shaper (or
+OFDM modulator), the mapper, the encoders and the stream demultiplexer. \Cref{eq:ebn0} is
+therefore correct for any chain, which is why the coded and MIMO curves of later chapters can
+be compared with uncoded theory on the same $E_b/N_0$ axis.
+
+\begin{table}[htbp]
+\centering\small
+\caption{SNR modes of the \blk{awgn} block.}
+\label{tab:snr-modes}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\prm{mode} & meaning of \prm{snr_db} & noise variance $\sigma^2$\\
+\midrule
+\code{snr}  & signal-to-noise ratio per sample & $P/\mathrm{SNR}$\\
+\code{esn0} & $E_s/N_0$ & $P N_{\mathrm{sps}}/(E_s/N_0)$\\
+\code{ebn0} & $E_b/N_0$ (default) & $P N_{\mathrm{sps}}/\big((E_b/N_0)\,k R N_s\big)$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The reference power $P$ is, in order of priority:
+\begin{enumerate}
+  \item the parameter \prm{signal_power};
+  \item the nominal power \meta{power} carried by the metadata (\prm{power_reference}\code{=nominal},
+  the textbook definition of \emph{average} SNR);
+  \item the power measured over the batch.
+\end{enumerate}
+The nominal reference matters for fading: the average SNR is defined by the transmitted power,
+not by the instantaneous power after a deep fade.
+
+\codeexcerpt{awgn_noise_var}{Noise variance from the SNR definition (\file{awgn.py}).}
+\codeexcerpt{awgn_process}{Adding the noise. Real inputs get $\sigma^2/2$ per real dimension.}
+
+\begin{remark}
+For a real signal only the in-phase noise component matters, with variance $\sigma^2/2=N_0/2$.
+A real antipodal (NRZ, 2-PAM) signal then has the same error probability as BPSK, as it should.
+This is tested in \file{tests/test_wireline_optical.py}.
+\end{remark}
+
+% ------------------------------------------------------------------
+\section{Monte-Carlo estimation of error rates}\label{sec:mc}
+\subsection{The estimator and its accuracy}
+Let $N$ bits be observed and $K$ of them be in error. If errors are independent with
+probability $p$, then $K\sim\mathrm{Binomial}(N,p)$ and the natural estimator
+$\hat p=K/N$ is unbiased with
+\begin{equation}
+  \Var\hat p=\frac{p(1-p)}{N},\qquad
+  \frac{\sqrt{\Var\hat p}}{p}=\sqrt{\frac{1-p}{Np}}\approx\frac{1}{\sqrt{\E K}} .
+\end{equation}
+The relative accuracy depends only on the number of \emph{errors}, not on the number of bits.
+Stopping a simulation after a fixed number of errors (\cref{sec:simulation}) therefore gives the
+same relative accuracy at every SNR: 100 errors give about $\pm10\,\%$ standard deviation, and
+$\pm20\,\%$ at 95\,\% confidence.
+
+\subsection{The Wilson score interval}
+The normal approximation $\hat p\pm z\sqrt{\hat p(1-\hat p)/N}$ fails when $K$ is small: with
+$K=0$ it gives a zero-width interval. The Wilson interval~\cite{wilson1927} instead inverts the test
+$|\hat p-p|\le z\sqrt{p(1-p)/N}$ for the unknown $p$. Squaring gives the quadratic
+$(1+z^2/N)p^2-(2\hat p+z^2/N)p+\hat p^2\le0$, whose roots are
+\begin{equation}
+  p_{\pm}=\frac{\hat p+\dfrac{z^2}{2N}\pm z\sqrt{\dfrac{\hat p(1-\hat p)}{N}+\dfrac{z^2}{4N^2}}}{1+\dfrac{z^2}{N}},
+  \qquad z=1.96\ \text{for 95\,\%}.
+  \label{eq:wilson}
+\end{equation}
+The interval is never empty, stays inside $[0,1]$ and is accurate even for a handful of errors.
+\blk{ber_meter} reports it as \code{ber_ci_low} and \code{ber_ci_high}, and the GUI shows it next
+to the BER.
+\codeexcerpt{wilson}{The Wilson interval in \file{metrics.py}.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogxaxis}[width=10cm,height=5.2cm,xlabel={number of observed errors $K$},
+  ylabel={$p_\pm/\hat p$},ymin=0,ymax=3,xmin=1,xmax=2000,legend pos=north east]
+  \addplot[name path=hi,accent,thick] table[x=errors,y=hi]{\datafile{wilson}};
+  \addplot[name path=lo,accent,thick] table[x=errors,y=lo]{\datafile{wilson}};
+  \addplot[accent!15] fill between[of=hi and lo];
+  \addplot[black!50,dashed,domain=1:2000,samples=2] {1};
+  \legend{95\,\% Wilson bounds}
+\end{semilogxaxis}
+\end{tikzpicture}
+\caption{Width of the 95\,\% confidence interval relative to the estimate, as a function of the
+number of observed errors (computed with \code{wilson_interval} at $p=10^{-4}$). Ten errors leave
+a factor of about two of uncertainty; one hundred errors bring it to $\pm20\,\%$.}
+\label{fig:wilson}
+\end{figure}
+
+\begin{pitfall}[Correlated errors]
+The binomial model assumes independent errors. After a decoder, or in block fading, errors come
+in bursts within a frame. The interval is then optimistic, because the effective number of
+independent observations is closer to the number of erroneous \emph{frames}. For coded systems,
+judge the accuracy by \code{frame_errors} as well.
+\end{pitfall}
+
+% ------------------------------------------------------------------
+\section{Closed-form references}
+\file{linkstudio/phy/theory.py} collects the closed-form results used in tests, demos, the GUI
+and this manual. All functions accept arrays and SNRs in dB.
+\begin{center}\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\code{ber_bpsk}, \code{ber_pam}, \code{ber_qam} & exact Gray-coded BER over AWGN (\cref{sec:ber-awgn})\\
+\code{ser_psk}, \code{ber_psk} & Craig's integral for M-PSK\\
+\code{ber_bpsk_rayleigh}, \code{ber_bpsk_mrc}, \code{ber_rayleigh} & fading and diversity (\cref{sec:rayleigh-ber})\\
+\code{ber_hamming_hard} & post-decoding BER of Hamming codes\\
+\code{ook_q_factor}, \code{q_to_ber}, \code{osnr_to_esn0_db} & optical receivers (\cref{ch:optical})\\
+\code{gaussian_pulse_broadening} & dispersion of a Gaussian pulse\\
+\code{shannon_capacity}, \code{ebn0_min_db} & information-theoretic limits\\
+\bottomrule
+\end{tabularx}
+\end{center}

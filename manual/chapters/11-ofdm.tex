@@ -1,0 +1,202 @@
+\chapter{OFDM}\label{ch:ofdm}
+
+Orthogonal frequency-division multiplexing turns a frequency-selective channel into many
+parallel flat channels, each equalized by a single complex division. This chapter derives the
+property, describes the subcarrier layout and the pilot-based receiver of
+\file{phy/waveform/ofdm.py}, and examines the two weaknesses of OFDM: synchronization and
+peak-to-average power ratio.
+
+% ------------------------------------------------------------------
+\section{Cyclic prefix and circular convolution}
+An OFDM symbol carries $N$ frequency-domain values $X_k$ (the subcarrier symbols). The
+transmitter computes the unitary inverse DFT and prepends the last $N_{\mathrm{cp}}$ samples
+(the \emph{cyclic prefix}):
+\begin{equation}
+  x[n]=\frac{1}{\sqrt N}\sum_{k=0}^{N-1}X_k\,e^{j2\pi kn/N},\qquad n=-N_{\mathrm{cp}},\dots,N-1 .
+\end{equation}
+\begin{proposition}
+If the channel impulse response has length $L\le N_{\mathrm{cp}}+1$, then after removing the
+prefix and applying the unitary DFT,
+\begin{equation}
+  Y_k=H_kX_k+W_k,\qquad H_k=\sum_{l=0}^{L-1}h_l\,e^{-j2\pi kl/N},\qquad W_k\sim\CN(0,\sigma^2)\ \text{i.i.d.}
+  \label{eq:ofdm-model}
+\end{equation}
+\end{proposition}
+\begin{proof}
+Thanks to the prefix, the $N$ retained received samples equal the \emph{circular} convolution of
+$x$ with $h$: $\vect y=\mat C\vect x+\vect w$, with $\mat C$ circulant. Every circulant matrix is
+diagonalized by the DFT, $\mat C=\mat F\Her\diag(H_0,\dots,H_{N-1})\mat F$ with $\mat F$ the
+unitary DFT matrix. Hence $\mat F\vect y=\diag(H)\mat F\vect x+\mat F\vect w$, and
+$\mat F\vect w$ is white with the same variance because $\mat F$ is unitary.
+\end{proof}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \foreach \s in {0,1,2} {
+    \begin{scope}[xshift=\s*4.3cm]
+      \draw[fill=kgrid!35,draw=kgrid] (0,0) rectangle (0.9,0.8);
+      \draw[fill=kgrid!10,draw=kgrid] (0.9,0) rectangle (4.1,0.8);
+      \fill[kgrid!35] (3.2,0) rectangle (4.1,0.8);
+      \node[lbl] at (0.45,0.4) {CP};
+      \node[lbl] at (2.05,0.4) {$N$ samples};
+      \draw[->,kgrid!80!black,thin] (3.65,0.85) to[bend right=30] (0.45,0.85);
+    \end{scope}}
+  \draw[decorate,decoration={brace,mirror,amplitude=4pt}] (0,-0.1) -- node[below=4pt,lbl]{$N+N_{\mathrm{cp}}$} (4.1,-0.1);
+  \draw[accent2,thick] (5.2,-0.55) -- (8.4,-0.55) node[right,lbl]{FFT window};
+  \draw[accent2] (5.2,-0.45)--(5.2,-0.65) (8.4,-0.45)--(8.4,-0.65);
+\end{tikzpicture}
+\caption{OFDM symbols with cyclic prefix. Any FFT window starting inside the prefix (after the
+channel transient) sees a cyclically shifted symbol, which only multiplies $X_k$ by a linear phase.}
+\label{fig:ofdm-cp}
+\end{figure}
+
+\begin{incode}
+\blk{ofdm_modulator} builds an \code{OFDMLayout}, maps data and pilots onto the grid, applies
+\code{np.fft.ifft(..., norm="ortho")} and adds the prefix. The unitary transform keeps the
+noise variance per subcarrier equal to the noise variance per time sample.
+
+It sets \meta{sps}$=N/N_{\mathrm{act}}$ and
+\meta{power}$=(N_{\mathrm{data}}P_d+N_{\mathrm{pil}})/N$. By \cref{eq:esn0} the AWGN block in
+$E_s/N_0$ mode then produces $\sigma^2=1/(E_s/N_0)$, the per-subcarrier SNR. Cyclic-prefix and
+pilot overheads are deliberately not counted in $E_s$.
+\end{incode}
+\codeexcerpt{ofdm_mod}{Resource mapping, unitary IFFT and cyclic prefix.}
+
+% ------------------------------------------------------------------
+\section{Subcarrier layout}
+$N_{\mathrm{act}}$ subcarriers are used around DC. DC itself is left empty, as in Wi-Fi and LTE,
+and the remaining edge subcarriers act as guard bands. Every \prm{pilot_spacing}-th active
+subcarrier carries a known pilot. The last active subcarrier is always a pilot, so that
+interpolation never extrapolates. Pilot values are a fixed pseudo-random QPSK sequence;
+identical pilots would add up coherently into a periodic time-domain peak.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=0.36cm,y=1cm]
+  % active k = -13..-1, 1..13; pilots where the active index is a multiple of 6, plus the last one
+  \foreach \k in {-16,-15,-14,14,15,16} \draw[black!25] (\k,0)--(\k,0.25);
+  \draw[black!60] (0,0)--(0,0.25); \node[lbl,below] at (0,0) {DC};
+  \foreach \k in {-12,-11,-10,-9,-8,-6,-5,-4,-3,-2,1,2,3,4,5,7,8,9,10,11}
+    \fill[accent3!70] (\k-0.3,0) rectangle (\k+0.3,0.65);
+  \foreach \k in {-13,-7,-1,6,12,13}
+    \fill[accent2] (\k-0.3,0) rectangle (\k+0.3,0.95);
+  \draw[->] (-17,0) -- (17.5,0) node[right,lbl]{$k$};
+  \fill[accent2] (-15,1.45) rectangle (-14.4,1.7); \node[lbl,right] at (-14.2,1.57) {pilot};
+  \fill[accent3!70] (-9,1.45) rectangle (-8.4,1.7); \node[lbl,right] at (-8.2,1.57) {data};
+  \draw[black!40] (-3,1.45)--(-3,1.7); \node[lbl,right] at (-2.8,1.57) {unused (guard)};
+\end{tikzpicture}
+\caption{Layout with $N_{\mathrm{act}}=26$ active subcarriers and a pilot every 6 (the first and the
+last active subcarriers are pilots).}
+\label{fig:ofdm-layout}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Channel estimation and equalization}
+\subsection{Least squares on pilots}
+At pilot subcarriers \cref{eq:ofdm-model} gives the LS estimate $\hat H_p=Y_p/X_p$, with error
+variance $\sigma^2$ since pilots have unit modulus. The channel at data subcarriers is
+obtained by linear interpolation, implemented as a fixed matrix from pilot to active
+subcarriers. Optionally the estimates are averaged over the OFDM symbols of a frame, which
+lowers the estimation noise when the channel is static.
+
+\subsection{Removing the timing phase slope}
+A timing offset of $\delta$ samples inside the prefix multiplies $H_k$ by $e^{-j2\pi k\delta/N}$.
+This fast phase rotation across subcarriers is poorly approximated by linear interpolation of
+the real and imaginary parts. The estimator therefore:
+\begin{enumerate}
+  \item estimates the dominant slope from products of adjacent pilots,
+  $\hat s=\arg\sum_p\hat H_{p+1}\hat H_p\conj\,/\,\Delta_p$;
+  \item removes it;
+  \item interpolates the now slowly varying response;
+  \item restores the slope.
+\end{enumerate}
+\codeexcerpt{ls_slope}{LS estimation with phase-slope removal (\blk{ofdm_channel_estimator}).}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=1 by 2,vertical sep=6mm,x descriptions at=edge bottom},
+  width=12cm,height=4.4cm,xmin=-51,xmax=51,xlabel={subcarrier index $k$}]
+\nextgroupplot[ylabel={$|H_k|$ [dB]},legend pos=south west,legend columns=3]
+  \addplot[th=black!70] table[x=k,y=true_db]{\datafile{ofdm_chest}};
+  \addplot[th=accent,dashed] table[x=k,y=ls_db]{\datafile{ofdm_chest}};
+  \addplot[sim=accent2,mark size=1.4pt] table[x=k,y=db]{\datafile{ofdm_pilots}};
+  \legend{true channel,LS + interpolation,pilot estimates}
+\nextgroupplot[ylabel={$\arg H_k$ [rad]}]
+  \addplot[th=black!70] table[x=k,y=true_ph]{\datafile{ofdm_chest}};
+  \addplot[th=accent,dashed] table[x=k,y=ls_ph]{\datafile{ofdm_chest}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{One OFDM symbol over the EVA channel ($N=128$, 100 active subcarriers, pilot every 6,
+$15$\,kHz spacing, $E_s/N_0=15$\,dB): true response from the channel's \code{csi} (\prm{perfect}
+estimator) and LS estimate.}
+\label{fig:ofdm-chest}
+\end{figure}
+
+\subsection{One-tap equalization}
+\blk{ofdm_equalizer} extracts the data subcarriers and divides by the estimate,
+$\hat X_k=Y_k/\hat H_k$. It writes the per-subcarrier noise variance $\sigma^2/|\hat H_k|^2$ to
+\meta{noise_var}. With coding and interleaving across subcarriers, the soft demapper then gives
+low weight to faded subcarriers. This is how OFDM obtains frequency diversity (see the Wi-Fi and
+LTE scenarios).
+
+% ------------------------------------------------------------------
+\section{Blind timing and frequency synchronization}\label{sec:ofdm-sync}
+The cyclic prefix is a copy of the end of each symbol, so the received signal is correlated
+with itself $N$ samples later over the prefix. Van de Beek \emph{et al.}~\cite{vandebeek1997}
+use this redundancy. With a CFO of $\varepsilon$ subcarrier spacings, $r[k+N]\approx r[k]e^{j2\pi\varepsilon}$
+inside the prefix, so the correlation
+\begin{equation}
+  \gamma(\theta)=\sum_{m}\sum_{k=\theta+mL}^{\theta+mL+N_{\mathrm{cp}}-1}r[k]\,r\conj[k+N],\qquad L=N+N_{\mathrm{cp}},
+\end{equation}
+peaks in magnitude at the symbol start, and its phase gives the fractional CFO:
+\begin{equation}
+  \hat\theta=\argmax_\theta|\gamma(\theta)|,\qquad \hat\varepsilon=-\frac{1}{2\pi}\arg\gamma(\hat\theta),\quad|\varepsilon|<\tfrac12 .
+\end{equation}
+The block accumulates $\gamma$ over all OFDM symbols of the frame with cumulative sums, which
+makes the search over $\theta$ linear in the frame length. It then starts the FFT window
+\prm{backoff} samples early, inside the prefix, to stay clear of the channel's delay spread.
+The resulting linear phase is absorbed by the channel estimator. Compared with the full ML
+metric of van de Beek, the energy correction term is omitted; it matters only at low SNR.
+\codeexcerpt{ofdm_sync}{CP correlation, timing and fractional CFO (\blk{ofdm_sync}).}
+
+\begin{pitfall}
+An integer CFO (a multiple of the subcarrier spacing) shifts the whole grid and is
+invisible to the CP correlation. It must be resolved with a preamble or pilots, which this
+block does not do.
+\end{pitfall}
+
+% ------------------------------------------------------------------
+\section{Peak-to-average power ratio}\label{sec:papr}
+Each time sample is a sum of $N_{\mathrm{act}}$ independent terms. By the central limit theorem
+it is nearly $\CN(0,P)$, so $|x|^2/P$ is approximately exponential. Treating the $N$ Nyquist-rate
+samples of a symbol as independent gives the classic approximation
+\begin{equation}
+  P\big(\mathrm{PAPR}>\gamma\big)\approx1-\big(1-e^{-\gamma}\big)^{N_{\mathrm{act}}} .
+\end{equation}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[width=10cm,height=6cm,xlabel={$\gamma$ [dB]},ylabel={$P(\mathrm{PAPR}>\gamma)$},
+  xmin=4,xmax=13,ymin=1e-3,ymax=1,legend pos=south west]
+  \addplot[sim=accent] table[x=papr,y=sim64]{\datafile{papr_ccdf}};
+  \addplot[th=accent] table[x=papr,y=th64]{\datafile{papr_ccdf}};
+  \addplot[sim={accent3,mark=square*}] table[x=papr,y=sim256]{\datafile{papr_ccdf}};
+  \addplot[th=accent3] table[x=papr,y=th256]{\datafile{papr_ccdf}};
+  \addplot[sim={accent2,mark=triangle*}] table[x=papr,y=sim1024]{\datafile{papr_ccdf}};
+  \addplot[th=accent2] table[x=papr,y=th1024]{\datafile{papr_ccdf}};
+  \legend{$N{=}64$ sim.,approx.,$N{=}256$ sim.,approx.,$N{=}1024$ sim.,approx.}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{CCDF of the per-symbol PAPR of QPSK-OFDM at the output of \blk{ofdm_modulator} (no
+oversampling, no prefix) and the approximation above. A PAPR of 10--12\,dB forces the
+power-amplifier back-off discussed in \cref{ch:impairments}.}
+\label{fig:papr}
+\end{figure}
+
+\begin{remark}
+The modulator produces Nyquist-rate samples, which miss part of the analog peaks; with
+oversampling the PAPR is typically about 0.5\,dB higher.
+\end{remark}

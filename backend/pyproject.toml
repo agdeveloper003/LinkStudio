@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linkstudio"
+version = "0.1.0"
+description = "Modular, block-based communication system simulator (PHY layer first)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.8"]
+ui = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8.0", "matplotlib>=3.8", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+
+[project.scripts]
+linkstudio = "linkstudio.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["linkstudio*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

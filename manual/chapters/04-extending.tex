@@ -1,0 +1,107 @@
+\chapter{Developer guide: writing blocks}\label{ch:extending}
+
+Adding a model to LinkStudio means writing one block class. The engine, the CLI, the scenario
+loader and the GUI pick it up automatically once it is registered. This chapter builds a
+complete example and lists the conventions a block must respect to behave like the built-in
+ones.
+
+\section{A complete example: free-space path loss}
+Suppose we want a block that attenuates a radio signal by the free-space loss between two
+isotropic antennas at distance $d$ and carrier frequency $f_c$ (Friis):
+\begin{equation}
+  L_{\mathrm{fs}} = \left(\frac{4\pi d f_c}{c}\right)^{2},\qquad
+  L_{\mathrm{fs}}\big|_{\mathrm{dB}} = 20\log_{10} d + 20\log_{10} f_c - 147.55 .
+\end{equation}
+The amplitude is scaled by $L_{\mathrm{fs}}^{-1/2}$. The nominal power metadata and any noise
+already present must be scaled by $L_{\mathrm{fs}}^{-1}$, so that a downstream \blk{awgn} block
+in \prm{nominal} mode still computes the SNR from the right reference.
+
+\begin{lstlisting}[style=py,caption={A new block, e.g. in \file{linkstudio/phy/channel/pathloss.py}.},label=lst:example-block]
+import numpy as np
+from pydantic import Field
+
+from linkstudio.core import Block, BlockParams, Kind, Port, RunContext, Signal, register_block
+
+C_LIGHT = 299_792_458.0
+
+
+@register_block("free_space_loss", category="channel")
+class FreeSpaceLoss(Block):
+    """Friis free-space path loss between isotropic antennas."""
+
+    class Params(BlockParams):                       # validated, serializable, shown in the GUI
+        distance_m: float = Field(100.0, gt=0, description="Link distance.")
+        carrier_hz: float = Field(2.4e9, gt=0, description="Carrier frequency.")
+
+    inputs = {"in": Port(Kind.SYMBOLS | Kind.SAMPLES)}
+    outputs = {"out": Port.like("in")}               # same kind as the input
+
+    def setup(self) -> None:                         # derived state, rebuilt on parameter change
+        p = self.params
+        self.loss = (4 * np.pi * p.distance_m * p.carrier_hz / C_LIGHT) ** 2
+
+    def on_reset(self) -> None:                      # runtime state, cleared before a run
+        self._frames = 0
+
+    def process(self, inputs: dict[str, Signal], ctx: RunContext) -> dict[str, Signal]:
+        x = inputs["in"]
+        meta = {k: x.meta[k] / self.loss for k in ("power", "noise_var") if x.meta.get(k) is not None}
+        self._frames += x.batch_size
+        return {"out": x.evolve(x.data / np.sqrt(self.loss), **meta)}
+
+    def metrics(self) -> dict[str, float]:
+        return {"loss_db": 10 * np.log10(self.loss), "frames": self._frames}
+\end{lstlisting}
+
+To register it, import the module in the package \code{__init__.py}
+(\file{linkstudio/phy/channel/__init__.py}). From then on:
+\begin{itemize}
+  \item \code{g.create("pl", "free_space_loss", distance_m=500)} works from Python;
+  \item \code{{type: free_space_loss, params: {distance_m: 500}}} works in YAML;
+  \item the block appears in the GUI palette under \emph{channel}, with a form for its two
+  parameters;
+  \item \code{pl.distance_m} can be swept;
+  \item \code{pl.loss_db} is reported among the metrics.
+\end{itemize}
+
+\section{Conventions}
+\begin{enumerate}[label=\textbf{C\arabic*.}]
+  \item \textbf{Shapes.} Accept any leading batch shape. Operate on the last axis and use
+  \code{...} indexing, so the block works for \code{(B, n)} as well as \code{(B, P, n)} arrays.
+  \item \textbf{Vectorize over the batch.} Loops over samples are acceptable for adaptive
+  algorithms, but each iteration should process all frames at once (see the LMS loop in
+  \cref{lst:lms_loop}).
+  \item \textbf{Kinds.} Declare the narrowest accepted kinds; use \code{Port.like} when the
+  output kind follows the input.
+  \item \textbf{Metadata.} Propagate with \code{evolve}. Update the keys your processing
+  changes (\meta{power}, \meta{noise_var}, \meta{sps}, \meta{delay}, \dots) and set them to
+  \code{None} when you cannot describe the result.
+  \item \textbf{Randomness.} Draw only from \code{self.rng}; never use NumPy's global
+  generator. This keeps runs reproducible (\cref{sec:blocks}).
+  \item \textbf{Real signals stay real.} Wireline and IM/DD chains are real-valued; do not
+  return complex arrays for real inputs.
+  \item \textbf{Errors.} Raise \code{BlockError} with a message telling the user how to fix the
+  problem (\emph{``Timing recovery needs an oversampled input (sps >= 2)''}).
+  \item \textbf{Metrics accumulate.} Sum counts in \code{process}, compute ratios in
+  \code{metrics}, clear them in \code{on_reset}.
+\end{enumerate}
+
+\section{Testing a block against theory}
+The test-suite follows one rule: a physical model is validated against a closed-form result,
+not against itself. \file{tests/helpers.py} provides \code{uncoded_link} and \code{ber_at}. A
+typical test reads:
+\begin{lstlisting}[style=py,numbers=none]
+def test_awgn_ber_matches_theory():
+    g = uncoded_link("qam", 16, snr_db=10.0, n_bits=4 * 1200)
+    assert np.isclose(ber_at(g, errors=300), theory.ber_qam(16, 10.0), rtol=0.2)
+\end{lstlisting}
+With 300 errors the relative standard deviation of the estimate is about $1/\sqrt{300}\approx
+6\,\%$, so a 20\,\% tolerance makes false alarms negligible but still detects a 1\,dB error. For
+our example the natural check is the metric itself: at \SI{100}{m} and \SI{2.4}{GHz},
+$L_{\mathrm{fs}}=80.05$\,dB. \Cref{ch:validation} lists the physics checks of the whole library.
+
+\section{Adding a scenario}
+Save a graph from the GUI, or write a YAML file under \file{backend/scenarios/<category>/}
+with \code{name}, \code{category} and \code{description}. The test
+\file{tests/test_scenarios.py} loads and runs every scenario file, so a broken scenario is
+caught automatically.

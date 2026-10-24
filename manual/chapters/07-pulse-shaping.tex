@@ -1,0 +1,142 @@
+\chapter{Pulse shaping and matched filtering}\label{ch:pulse}
+
+% ------------------------------------------------------------------
+\section{Linear modulation}
+A linearly modulated waveform is a train of pulses weighted by the symbols,
+\begin{equation}
+  x(t)=\sum_m a_m\,g(t-mT).
+\end{equation}
+For i.i.d. zero-mean symbols with $\E|a_m|^2=E_a$, the power spectral density is
+\begin{equation}
+  S_x(f)=\frac{E_a}{T}\,|G(f)|^2 ,
+  \label{eq:linear-psd}
+\end{equation}
+so the spectrum is shaped entirely by the pulse. The receiver filters with $h(t)$ and samples
+the output at $t=mT+\tau_0$. With $p=g\star h$ the end-to-end pulse,
+\begin{equation}
+  y(mT+\tau_0)=a_m\,p(\tau_0)+\underbrace{\sum_{l\neq m}a_l\,p\big((m-l)T+\tau_0\big)}_{\text{intersymbol interference}}+\,(w\star h)(mT+\tau_0).
+\end{equation}
+
+\section{The Nyquist criterion}
+The ISI vanishes for every symbol sequence if and only if $p(nT)=\delta[n]$ (taking
+$\tau_0=0$). By the Poisson summation formula this is equivalent to the frequency-domain
+condition
+\begin{equation}
+  \sum_{k=-\infty}^{\infty}P\!\left(f-\frac kT\right)=T\qquad\forall f .
+  \label{eq:nyquist}
+\end{equation}
+The narrowest solution is the ideal low-pass of bandwidth $1/(2T)$, the sinc pulse, which is
+not realizable and decays only as $1/t$. The \emph{raised-cosine} (RC) family trades bandwidth
+for decay. Its spectrum has a cosine roll-off of relative width $\beta$:
+\begin{equation}
+  P_{\mathrm{RC}}(f)=
+  \begin{cases}
+    T, & |f|\le\frac{1-\beta}{2T},\\[2pt]
+    \frac T2\Big[1+\cos\Big(\frac{\pi T}{\beta}\big(|f|-\frac{1-\beta}{2T}\big)\Big)\Big], & \frac{1-\beta}{2T}<|f|\le\frac{1+\beta}{2T},\\[2pt]
+    0, & \text{otherwise},
+  \end{cases}
+\end{equation}
+\begin{equation}
+  p_{\mathrm{RC}}(t)=\sinc\frac tT\,\frac{\cos(\pi\beta t/T)}{1-(2\beta t/T)^2}.
+\end{equation}
+The occupied bandwidth is $(1+\beta)R_s$ and the pulse decays as $1/t^3$.
+
+\section{The matched filter}
+Among all receive filters, the one maximizing the SNR at the sampling instant follows from the
+Cauchy--Schwarz inequality. For white noise of PSD $N_0$,
+\begin{equation}
+  \mathrm{SNR}=\frac{\big|\int G(f)H(f)\,df\big|^2}{N_0\int|H(f)|^2df}
+  \le\frac{\int|G(f)|^2df}{N_0}=\frac{E_g}{N_0},
+\end{equation}
+with equality for $H(f)=G\conj(f)$, that is $h(t)=g\conj(-t)$. To have both a matched filter
+and zero ISI, the RC response is split equally between transmitter and receiver. Each side
+uses the \emph{root-raised-cosine} (RRC) pulse, $|G_{\mathrm{RRC}}(f)|^2=P_{\mathrm{RC}}(f)$,
+whose impulse response is
+\begin{equation}
+  g_{\mathrm{RRC}}(t)=\frac{\sin\big(\pi\frac tT(1-\beta)\big)+4\beta\frac tT\cos\big(\pi\frac tT(1+\beta)\big)}
+  {\pi\frac tT\big(1-(4\beta\frac tT)^2\big)},
+\end{equation}
+with the finite limits $1-\beta+4\beta/\pi$ at $t=0$ and
+$\frac{\beta}{\sqrt2}\big[(1+\frac2\pi)\sin\frac{\pi}{4\beta}+(1-\frac2\pi)\cos\frac{\pi}{4\beta}\big]$ at
+$t=\pm T/(4\beta)$. These special points are handled explicitly in the code:
+\codeexcerpt{rrc_taps}{RRC taps with their singular points (\file{dsp/filters.py}).}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=16mm},width=6.9cm,height=5cm]
+\nextgroupplot[xlabel={$t/T$},ylabel={normalized amplitude},xmin=-4,xmax=4,ymin=-0.3,ymax=1.1,
+  xtick={-4,...,4},legend pos=north east,title={pulses, $\beta=0.25$}]
+  \addplot[th=accent] table[x=t,y=rc]{\datafile{pulses_time}};
+  \addplot[th=accent2,dashed] table[x=t,y=rrc]{\datafile{pulses_time}};
+  \legend{RC (Nyquist),RRC}
+\nextgroupplot[xlabel={$fT$},ylabel={$|P_{\mathrm{RC}}(f)|/P(0)$},xmin=0,xmax=1.1,ymin=0,ymax=1.1,
+  legend pos=north east,title={RC spectrum}]
+  \addplot[th=black!60] table[x=f,y=b0]{\datafile{pulses_freq}};
+  \addplot[th=accent] table[x=f,y=b25]{\datafile{pulses_freq}};
+  \addplot[th=accent3] table[x=f,y=b50]{\datafile{pulses_freq}};
+  \addplot[th=accent2] table[x=f,y=b100]{\datafile{pulses_freq}};
+  \legend{$\beta=0$,$\beta=0.25$,$\beta=0.5$,$\beta=1$}
+\end{groupplot}
+\end{tikzpicture}
+\caption{Left: the RC pulse crosses zero at every non-zero multiple of $T$, while the RRC pulse
+alone does not. Right: spectra of the truncated RC taps produced by \code{rc_taps} (span
+32 symbols). All curves pass through $0.5$ at $fT=0.5$, as required by \cref{eq:nyquist}.}
+\label{fig:pulses}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Discrete-time implementation}
+\begin{incode}
+\blk{pulse_shaper} upsamples by $N_{\mathrm{sps}}$ (zero stuffing) and convolves with
+unit-energy taps spanning \prm{span} symbols. It records the taps in \meta{pulse_taps}, the
+group delay $(L-1)/2$ in \meta{delay}, and the power per sample $1/N_{\mathrm{sps}}$ (unit
+symbol energy spread over $N_{\mathrm{sps}}$ samples).
+
+\blk{matched_filter} convolves with $g\conj[-n]$ (or another pulse), samples at the known
+delay and rescales.
+\end{incode}
+
+\codeexcerpt{pulse_shaper}{The pulse shaper and its metadata.}
+
+With unit-energy taps the peak of the end-to-end pulse is
+$p[0]=\sum_n|g[n]|^2=1$, and the noise gain of the matched filter is $\sum_n|h[n]|^2=1$. The
+block nevertheless normalizes by the actual peak and scales \meta{noise_var} by
+$\sum|h|^2/|p[0]|^2$, so that mismatched receive filters (an RC receive filter, a rectangular
+integrate-and-dump) also yield symbols at nominal amplitude with the correct noise variance:
+\codeexcerpt{mf_normalize}{Normalization of the matched filter output.}
+
+Following \cref{eq:esn0}, the AWGN block sets $\sigma^2=P N_{\mathrm{sps}}/(E_s/N_0)=1/(E_s/N_0)$
+on the waveform. After the matched filter the symbols have unit energy and noise variance
+$\sigma^2$, so the symbol SNR equals $E_s/N_0$, the matched-filter bound. This is verified in
+\file{tests/test_physics.py::test_pulse_shaped_link_matches_theory}: the BER of an
+RRC-shaped link equals the symbol-rate theory.
+
+\begin{pitfall}[Truncation]
+Taps are truncated to \prm{span} symbols. Short spans raise the spectral side lobes and leave
+a small residual ISI that grows as $\beta\to0$. For dense WDM or very small roll-offs, use
+spans of 32 symbols or more (the coherent optical scenarios use 32).
+\end{pitfall}
+
+\section{Eye diagrams}
+Overlaying traces of two symbol periods shows the ISI at a glance (\cref{fig:eye}). After the
+RRC transmit filter alone the eye is partially closed, because an RRC pulse is not a Nyquist
+pulse. After the matched filter all traces pass through $\pm1$ at the sampling instant.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=14mm},width=6.9cm,height=5cm,
+  xmin=-1,xmax=1,ymin=-1.5,ymax=1.5,xlabel={$t/T$},xtick={-1,-0.5,0,0.5,1}]
+\nextgroupplot[title={after the RRC transmit filter},ylabel={amplitude}]
+  \addplot[accent,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_tx}};
+\nextgroupplot[title={after the matched filter}]
+  \addplot[accent3,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_mf}};
+  \draw[accent2,dashed] (axis cs:0,-1.5) -- (axis cs:0,1.5);
+\end{groupplot}
+\end{tikzpicture}
+\caption{Eye diagrams of binary PAM with RRC pulses ($\beta=0.35$, 16 samples/symbol, 30\,dB
+SNR), cut from the outputs of \blk{pulse_shaper} and \blk{matched_filter} (\prm{decimate}\code{=false}).
+The dashed line is the sampling instant used by the matched filter.}
+\label{fig:eye}
+\end{figure}

@@ -1,0 +1,135 @@
+\chapter{Multiple antennas}\label{ch:mimo}
+
+% ------------------------------------------------------------------
+\section{The flat-fading MIMO channel}
+With $N_t$ transmit and $N_r$ receive antennas and flat fading, one channel use is
+\begin{equation}
+  \vect y=\mat H\vect x+\vect w,\qquad \mat H=\frac{1}{\sqrt{N_t}}\mat G,\quad G_{ij}\sim\CN(0,1),\quad \vect w\sim\CN(\vect0,\sigma^2\mat I).
+\end{equation}
+The normalization by $\sqrt{N_t}$ keeps the total transmitted power independent of the number of
+antennas. Every receive antenna then sees unit average signal power, and the SNR set in the
+\blk{awgn} block is the SNR \emph{per receive antenna}. Antenna correlation follows the
+Kronecker model with exponential correlation matrices,
+\begin{equation}
+  \mat H=\frac{1}{\sqrt{N_t}}\,\mat R_r^{1/2}\mat G\,\mat R_t^{1/2},\qquad [\mat R]_{ij}=\rho^{|i-j|}.
+\end{equation}
+
+\begin{incode}
+Multi-stream signals have shape $(B,N_t,n)$.
+\begin{itemize}
+  \item \blk{stream_demux} distributes symbols round-robin over the streams and sets
+  \meta{spatial_rate}$=N_t$, so that $E_b/N_0$ accounts for the $N_t$ symbols sent per channel
+  use (\cref{eq:ebn0}).
+  \item \blk{mimo_channel} draws $\mat H$ per frame (\prm{block}) or per symbol (\prm{fast}) and
+  publishes it on \code{csi} (\meta{csi_type}\code{="mimo"}).
+  \item \blk{mimo_detector} and \blk{alamouti_decoder} use it, and \blk{stream_mux} restores a
+  single stream.
+\end{itemize}
+\end{incode}
+
+% ------------------------------------------------------------------
+\section{Detection for spatial multiplexing}
+\subsection{Zero forcing}
+$\mat W_{\mathrm{ZF}}=(\mat H\Her\mat H)^{-1}\mat H\Her$ separates the streams exactly,
+$\hat{\vect x}=\vect x+\mat W\vect w$. Stream $k$ then has noise variance
+$\sigma^2[(\mat H\Her\mat H)^{-1}]_{kk}$, which becomes large when $\mat H$ is ill-conditioned. For
+$N_t=N_r$ each stream has only one degree of diversity.
+
+\subsection{MMSE and its bias}
+The linear MMSE estimator is $\mat W=(\mat H\Her\mat H+\sigma^2\mat I)^{-1}\mat H\Her$ (unit-power
+symbols). Its output is biased: $\E[\hat x_k|x_k]=b_kx_k$ with $b_k=(\mat W\mat H)_{kk}<1$.
+\begin{proposition}
+For the MMSE filter, the residual interference plus noise of stream $k$ has variance
+$b_k(1-b_k)$. After unbiasing ($\hat x_k/b_k$), the noise variance is therefore $(1-b_k)/b_k$,
+and the post-detection SINR is $b_k/(1-b_k)$.
+\end{proposition}
+\begin{proof}
+For the MMSE filter, the error covariance is
+$\mat E=\E[(\hat{\vect x}-\vect x)(\hat{\vect x}-\vect x)\Her]=\mat I-\mat W\mat H$, so the MSE of
+stream $k$ is $1-b_k$. Write $\hat x_k=b_kx_k+\nu_k$ with $\nu_k$ uncorrelated with $x_k$ (an
+orthogonality property of the MMSE estimator). Then
+$\mathrm{MSE}_k=(1-b_k)^2+\Var\nu_k=1-b_k$, which gives $\Var\nu_k=b_k(1-b_k)$.
+\end{proof}
+The block outputs the unbiased symbols and writes $(1-b_k)/b_k$ to \meta{noise_var}, so the
+soft demapper receives correctly scaled LLRs.
+\codeexcerpt{mimo_linear}{ZF and unbiased MMSE detection with post-detection noise variances.}
+
+\subsection{Maximum likelihood}
+$\hat{\vect x}=\argmin_{\vect x\in\mathcal S^{N_t}}\|\vect y-\mat H\vect x\|^2$ is optimal and
+achieves diversity $N_r$ per stream. The block searches all $M^{N_t}$ candidates exhaustively
+(limited to 4096) and outputs hard decisions.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[berplot,width=10cm,height=6.5cm,xmin=0,xmax=20,ymin=1e-5,ymax=0.5]
+  \addplot[simline=accent] table[x=ebn0,y=zf]{\datafile{mimo_smux}};
+  \addplot[simline={accent3,mark=square*}] table[x=ebn0,y=mmse]{\datafile{mimo_smux}};
+  \addplot[simline={accent2,mark=triangle*}] table[x=ebn0,y=ml]{\datafile{mimo_smux}};
+  \legend{ZF,MMSE,ML}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{$2\times2$ spatial multiplexing of QPSK over fast Rayleigh fading (simulated).
+ZF and MMSE have diversity 1, the same slope as single-antenna Rayleigh fading, and MMSE gains
+about 2\,dB. ML reaches diversity 2.}
+\label{fig:smux}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Diversity}\label{sec:diversity}
+\subsection{Receive diversity: maximal-ratio combining}
+With one transmit antenna, ZF and MMSE reduce to maximal-ratio combining,
+$\hat x=\vect h\Her\vect y/\|\vect h\|^2$, whose SNR is the sum of the branch SNRs. For BPSK with
+$L$ i.i.d. Rayleigh branches of mean SNR $\bar\gamma$ each~\cite{proakis2008},
+\begin{equation}
+  \bar P_b=p^L\sum_{l=0}^{L-1}\binom{L-1+l}{l}(1-p)^l,\qquad
+  p=\frac{1-\mu}{2},\quad \mu=\sqrt{\frac{\bar\gamma}{1+\bar\gamma}},
+  \label{eq:mrc}
+\end{equation}
+and asymptotically $\bar P_b\propto\bar\gamma^{-L}$: the slope of the curve is the diversity order.
+
+\subsection{Transmit diversity: the Alamouti code}
+Two symbols are sent over two antennas in two symbol periods~\cite{alamouti1998}:
+\begin{equation}
+  \begin{array}{c|cc}
+    & \text{antenna 1} & \text{antenna 2}\\ \hline
+    t_1 & s_1 & s_2\\
+    t_2 & -s_2\conj & s_1\conj
+  \end{array}
+  \qquad\Longrightarrow\qquad
+  \begin{aligned}
+    \tilde s_1&=h_1\conj r_1+h_2r_2\conj=(|h_1|^2+|h_2|^2)\,s_1+\tilde w_1,\\
+    \tilde s_2&=h_2\conj r_1-h_1r_2\conj=(|h_1|^2+|h_2|^2)\,s_2+\tilde w_2 .
+  \end{aligned}
+\end{equation}
+The code is orthogonal, so the linear combiner decouples the symbols and gives full diversity
+2 without channel knowledge at the transmitter. The decoder sums over any number of receive
+antennas. Because the transmit power is split between the antennas, the SNR is $3$\,dB below
+two-branch MRC: $\bar P_b^{\text{Alamouti}}(\bar\gamma)=\bar P_b^{\text{MRC},L=2}(\bar\gamma/2)$.
+\codeexcerpt{alamouti_dec}{Alamouti combining over $N_r$ receive antennas.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[berplot,width=11cm,height=7cm,xmin=0,xmax=22,ymin=1e-5,ymax=0.5,legend columns=2]
+  \addplot[th=black!50,dashed] table[x=ebn0,y=awgn]{\datafile{diversity_theory}};
+  \addlegendentry{AWGN}
+  \addplot[th=accent] table[x=ebn0,y=siso]{\datafile{diversity_theory}};
+  \addlegendentry{Rayleigh, theory}
+  \addplot[sim=accent] table[x=ebn0,y=siso]{\datafile{diversity_sim}};
+  \addlegendentry{SISO simulated}
+  \addplot[th=accent3] table[x=ebn0,y=mrc2]{\datafile{diversity_theory}};
+  \addlegendentry{MRC $L{=}2$, theory}
+  \addplot[sim={accent3,mark=square*}] table[x=ebn0,y=mrc2]{\datafile{diversity_sim}};
+  \addlegendentry{$1{\times}2$ simulated}
+  \addplot[th=accent2] table[x=ebn0,y=alamouti]{\datafile{diversity_theory}};
+  \addlegendentry{Alamouti, theory}
+  \addplot[sim={accent2,mark=triangle*}] table[x=ebn0,y=alamouti]{\datafile{diversity_sim}};
+  \addlegendentry{$2{\times}1$ simulated}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{BPSK over Rayleigh fading: single antenna (\cref{eq:rayleigh-ber}), $1\times2$ MRC and
+$2\times1$ Alamouti (\cref{eq:mrc}). The $E_b/N_0$ axis is per receive antenna. Diversity 2
+doubles the slope; Alamouti runs parallel to MRC, 3\,dB to the right.}
+\label{fig:diversity}
+\end{figure}

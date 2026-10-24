@@ -1,0 +1,147 @@
+\chapter{Radio front-end impairments}\label{ch:impairments}
+
+Real transmitters and receivers distort the signal before any propagation effect. This chapter
+models the impairments implemented in \file{phy/channel/impairments.py}. \Cref{fig:impair-const}
+shows their signatures on a 16-QAM constellation.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=4 by 1,horizontal sep=4mm,y descriptions at=edge left},
+  constaxis,width=4.1cm,height=4.1cm]
+\nextgroupplot[title={AWGN only}]
+  \addplot[scatterpts=accent] table[x=i,y=q]{\datafile{const_awgn}};
+\nextgroupplot[title={phase noise}]
+  \addplot[scatterpts=accent3] table[x=i,y=q]{\datafile{const_pn}};
+\nextgroupplot[title={IQ imbalance}]
+  \addplot[scatterpts=accent4] table[x=i,y=q]{\datafile{const_iq}};
+\nextgroupplot[title={Saleh PA, 4\,dB IBO}]
+  \addplot[scatterpts=accent2] table[x=i,y=q]{\datafile{const_pa}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{16-QAM at $E_s/N_0=26$\,dB through \blk{phase_noise} (150\,Hz linewidth at
+1\,MBd), \blk{iq_imbalance} (1.5\,dB, $8^\circ$) and \blk{power_amplifier} (Saleh). Phase
+noise smears points along circles; IQ imbalance turns the square grid into a parallelogram;
+the PA compresses and rotates the outer points.}
+\label{fig:impair-const}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Carrier frequency and phase offsets}
+A local oscillator at $f_c+\Delta f$ with phase $\phi_0$ turns the received envelope into
+\begin{equation}
+  y[n]=x[n]\,e^{\,j(2\pi\Delta f\,n/f_s+\phi_0)} .
+\end{equation}
+\blk{carrier_offset} applies this rotation (\prm{cfo_hz}, \prm{phase_deg}, or a uniformly random
+phase per frame). Synchronization (\cref{ch:sync}) estimates and removes it.
+
+% ------------------------------------------------------------------
+\section{Oscillator phase noise}\label{sec:phase-noise}
+A free-running oscillator accumulates phase errors. The standard model, and the one used for
+lasers in \cref{ch:optical}, is a Wiener process: the instantaneous frequency deviation is
+white, so the phase performs a random walk. In discrete time,
+\begin{equation}
+  \phi[n]=\phi[n-1]+\varepsilon[n],\qquad \varepsilon[n]\sim\N\!\Big(0,\ \frac{2\pi\Delta\nu}{f_s}\Big).
+  \label{eq:wiener}
+\end{equation}
+\begin{proposition}
+The field $e^{j\phi(t)}$ of a Wiener phase with increment variance $2\pi\Delta\nu|\tau|$ has a
+Lorentzian spectrum of full width at half maximum $\Delta\nu$.
+\end{proposition}
+\begin{proof}
+$\phi(t+\tau)-\phi(t)\sim\N(0,2\pi\Delta\nu|\tau|)$, and $\E e^{jX}=e^{-\Var X/2}$ for a Gaussian
+$X$, so the autocorrelation is $R(\tau)=e^{-\pi\Delta\nu|\tau|}$. Its Fourier transform is
+\[
+  S(f)=\frac{\Delta\nu/(2\pi)}{f^2+(\Delta\nu/2)^2},
+\]
+which falls to half its peak at $f=\pm\Delta\nu/2$.
+\end{proof}
+\codeexcerpt{phase_noise}{Wiener phase noise (\blk{phase_noise}).}
+The phase variance grows linearly with time. What matters for a receiver is therefore the
+product $\Delta\nu\,T$ of linewidth and symbol duration: carrier recovery must track the phase
+faster than it wanders.
+
+% ------------------------------------------------------------------
+\section{IQ imbalance}
+In a quadrature down-converter the Q branch may have a gain $g\ne1$ and a phase error $\varphi$
+relative to the I branch. Writing the two branch outputs and recombining them gives the
+widely-linear model
+\begin{equation}
+  y=K_1x+K_2x\conj+d,\qquad K_1=\frac{1+g\,e^{-j\varphi}}{2},\qquad K_2=\frac{1-g\,e^{j\varphi}}{2},
+  \label{eq:iq}
+\end{equation}
+where $d$ is a DC offset. The conjugate term creates a mirror image of the signal. Its
+strength is measured by the image rejection ratio $\mathrm{IRR}=|K_1|^2/|K_2|^2$; for $g=1.5$\,dB
+and $\varphi=8^\circ$ it is about $19$\,dB. On a constellation it shears the square grid
+(\cref{fig:impair-const}).
+\codeexcerpt{iq_imbalance}{IQ imbalance and DC offset (\blk{iq_imbalance}).}
+
+% ------------------------------------------------------------------
+\section{Power amplifier nonlinearity}
+A memoryless band-pass nonlinearity acts on the envelope $x=re^{j\theta}$ as
+\begin{equation}
+  y=A(r)\,e^{\,j(\theta+\Phi(r))},
+\end{equation}
+where $A(r)$ is the AM/AM curve and $\Phi(r)$ the AM/PM curve. The input is first scaled so that
+its mean power lies \prm{input_backoff_db} below the saturation level $A_{\mathrm{sat}}=1$
+(input back-off, IBO). Three models are implemented:
+\begin{align}
+  \text{Rapp (solid state):}\quad & A(r)=\frac{r}{\big(1+r^{2p}\big)^{1/(2p)}},\qquad\Phi=0,\\
+  \text{Saleh (TWTA):}\quad & A(r)=\frac{r}{1+\beta_a r^2},\qquad \Phi(r)=\frac{\alpha_\phi r^2}{1+\beta_\phi r^2},\\
+  \text{ideal clipper:}\quad & A(r)=\min(r,1),\qquad\Phi=0.
+\end{align}
+The Saleh AM/AM curve is divided by $\alpha_a$ so that all models have unit small-signal gain;
+the default constants are those of Saleh's original TWT fit~\cite{saleh1981}. The smoothness
+$p$ of the Rapp model interpolates between a soft compression ($p=1$) and the ideal clipper
+($p\to\infty$).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=18mm},width=6.8cm,height=5.2cm,
+  xlabel={input amplitude $r$},xmin=0,xmax=2]
+\nextgroupplot[ylabel={output amplitude $A(r)$},ymin=0,ymax=1.2,legend pos=south east,title={AM/AM}]
+  \addplot[th=black!40,dashed,domain=0:1.2] {x};
+  \addplot[th=accent] table[x=r,y=rapp1]{\datafile{pa_curves}};
+  \addplot[th=accent3] table[x=r,y=rapp2]{\datafile{pa_curves}};
+  \addplot[th=accent4] table[x=r,y=rapp5]{\datafile{pa_curves}};
+  \addplot[th=black!70] table[x=r,y=clip]{\datafile{pa_curves}};
+  \addplot[th=accent2] table[x=r,y=saleh]{\datafile{pa_curves}};
+  \legend{linear,Rapp $p{=}1$,Rapp $p{=}2$,Rapp $p{=}5$,clipper,Saleh}
+\nextgroupplot[ylabel={phase shift $\Phi(r)$ [deg]},ymin=0,ymax=25,title={AM/PM (Saleh)}]
+  \addplot[th=accent2] table[x=r,y=saleh_pm_deg]{\datafile{pa_curves}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{PA characteristics measured by driving the \blk{power_amplifier} block with an amplitude
+ramp (back-off chosen so that the block's input scaling is unity).}
+\label{fig:pa}
+\end{figure}
+\codeexcerpt{power_amplifier}{Back-off scaling and the AM/AM, AM/PM models.}
+
+\begin{pitfall}
+The nonlinearity generates spectral regrowth (out-of-band emission) and an in-band error that
+is \emph{not} Gaussian. For OFDM, whose envelope is nearly Gaussian (\cref{sec:papr}), an IBO
+of several dB is needed. Compare the \blk{power_meter} PAPR with the back-off.
+\end{pitfall}
+
+% ------------------------------------------------------------------
+\section{Analog-to-digital conversion}
+\blk{quantizer} models a uniform mid-rise ADC with $b$ bits on each of I and Q. The full scale
+$A$ is either given or set to \prm{loading_factor}$\times$ the RMS value $\sigma_x$ of each
+component. The step is $\Delta=2A/2^b$. For a signal that does not clip, the quantization error is
+approximately uniform with variance $\Delta^2/12$, giving
+\begin{equation}
+  \mathrm{SQNR}=\frac{\sigma_x^2}{\Delta^2/12}=\frac{3\cdot2^{2b}}{(A/\sigma_x)^2}
+  \ \Rightarrow\ \mathrm{SQNR}_{\mathrm{dB}}\approx6.02\,b+4.77-20\log_{10}\frac{A}{\sigma_x}.
+\end{equation}
+With the default loading factor of 4 (clipping probability about $6\times10^{-5}$ for a Gaussian
+component), an 8-bit ADC gives about 41\,dB.
+\codeexcerpt{quantizer}{Uniform mid-rise quantization with clipping.}
+
+% ------------------------------------------------------------------
+\section{Timing offset}
+\blk{timing_offset} delays the signal by $d=\lfloor d\rfloor+\mu$ samples. The integer part is a
+shift. The fractional part uses a Blackman-windowed sinc interpolator of 33 taps,
+$h[n]=\sinc(n-16-\mu)\,w[n]/\sum_n\sinc(n-16-\mu)\,w[n]$, which is accurate as long as the signal
+is oversampled. The frame length is preserved, so a delay pushes the tail out of the frame; the
+\blk{preamble} block appends guard symbols for this reason.

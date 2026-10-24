@@ -1,0 +1,34 @@
+name: LTE-like OFDM, mobile channel
+category: Wireless
+description: 1.4 MHz LTE-like numerology (15 kHz subcarriers, 72 used tones) with a coded 16-QAM
+  stream, bit-interleaved across the band, over the 3GPP EVA channel with 70 Hz Doppler and LS channel estimation per OFDM symbol.
+seed: 2
+batch_size: 8
+blocks:
+  src: {type: random_bits, params: {n_bits: 3994}}
+  enc: {type: conv_encoder}
+  il: {type: interleaver, params: {kind: random, seed: 5}}
+  map: {type: mapper, params: {scheme: qam, order: 16}}
+  ofdm: {type: ofdm_modulator, params: {n_fft: 128, cp_len: 10, n_active: 72, pilot_spacing: 6}}
+  ch: {type: multipath, params: {preset: EVA, variation: jakes, doppler_hz: 70.0}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 14.0}}
+  demod: {type: ofdm_demodulator}
+  est: {type: ofdm_channel_estimator, params: {method: ls}}
+  eq: {type: ofdm_equalizer}
+  demap: {type: demapper, params: {method: maxlog}}
+  dil: {type: interleaver, params: {kind: random, seed: 5, inverse: true}}
+  dec: {type: viterbi_decoder}
+  ber: {type: ber_meter}
+chain: [src, enc, il, map, ofdm, ch, awgn, demod, est]
+edges:
+  - demod.out -> eq.in
+  - est.out -> eq.csi
+  - eq.out -> demap.in
+  - demap.out -> dil.in
+  - dil.out -> dec.in
+  - dec.out -> ber.rx
+  - src.out -> ber.tx
+probes:
+  - {key: demod.out, view: grid}
+  - {key: est.out, view: csi}
+  - {key: eq.out, view: constellation}

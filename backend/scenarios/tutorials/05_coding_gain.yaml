@@ -1,0 +1,27 @@
+name: 5 - Coding gain (two branches)
+category: Tutorials
+description: The same bits go through an uncoded BPSK branch and a rate-1/2 convolutional branch
+  with soft Viterbi decoding, both at the same Eb/N0. Compare ber_uncoded and ber_coded.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 1000}}
+  map_u: {type: mapper, params: {scheme: psk, order: 2}}
+  awgn_u: {type: awgn, params: {mode: ebn0, snr_db: 4.0}}
+  demap_u: {type: demapper, params: {method: hard}}
+  ber_uncoded: {type: ber_meter}
+  enc: {type: conv_encoder}
+  map_c: {type: mapper, params: {scheme: psk, order: 2}}
+  awgn_c: {type: awgn, params: {mode: ebn0, snr_db: 4.0}}
+  demap_c: {type: demapper, params: {method: maxlog}}
+  dec: {type: viterbi_decoder}
+  ber_coded: {type: ber_meter}
+chain:
+  - [src, map_u, awgn_u, demap_u, ber_uncoded.rx]
+  - [src, enc, map_c, awgn_c, demap_c, dec, ber_coded.rx]
+edges:
+  - src.out -> ber_uncoded.tx
+  - src.out -> ber_coded.tx
+probes:
+  - {key: awgn_u.out, view: constellation}
+  - {key: demap_c.out, view: histogram}

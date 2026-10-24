@@ -1,0 +1,326 @@
+\chapter{The simulation engine}\label{ch:engine}
+
+The engine (\file{linkstudio/core}) is about one thousand lines of Python and contains no
+communication theory. It provides five abstractions:
+\begin{itemize}
+  \item \emph{signals} that flow along edges;
+  \item \emph{blocks} that transform them;
+  \item \emph{graphs} that connect blocks;
+  \item \emph{simulations} that run graphs batch after batch;
+  \item \emph{sweeps} that repeat simulations over a parameter grid.
+\end{itemize}
+This chapter describes each of them and the rules they enforce.
+
+% ------------------------------------------------------------------
+\section{Signals}\label{sec:signal}
+A \code{Signal} (\file{core/signal.py}) is an immutable record with four fields:
+\begin{description}[font=\ttfamily\color{accent}]
+  \item[data] a NumPy array. Axis 0 is always the \emph{batch} (independent frames simulated in
+  parallel) and the last axis is time, bit index or subcarrier index. Multi-dimensional kinds
+  add axes in between, as in \cref{fig:signal-shapes}.
+  \item[kind] the semantic type of the data, a flag of the \code{Kind} enumeration
+  (\cref{tab:kinds}).
+  \item[fs] the sample or symbol rate in Hz, when it is meaningful.
+  \item[meta] a dictionary of metadata that travels downstream with the data (\cref{sec:metadata}).
+\end{description}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+  % 2D
+  \begin{scope}
+    \foreach \r in {0,...,3} \foreach \c in {0,...,7}
+      \draw[fill=ksym!10,draw=ksym!60] (\c*0.4,-\r*0.4) rectangle ++(0.4,0.4);
+    \draw[->] (-0.2,0.6) -- node[above,lbl]{time (last axis)} (3.4,0.6);
+    \draw[->] (-0.25,0.4) -- node[left,lbl,align=right]{batch\\(axis 0)} (-0.25,-1.2);
+    \node[lbl,below] at (1.6,-1.35) {\code{(B, n)}: bits, symbols, samples};
+  \end{scope}
+  % 3D streams
+  \begin{scope}[xshift=4.9cm]
+    \foreach \p in {1,0} {
+      \foreach \r in {0,...,3} \foreach \c in {0,...,6}
+        \draw[fill=ksamp!10,draw=ksamp!60] (\c*0.4+\p*0.25,-\r*0.4+\p*0.25) rectangle ++(0.4,0.4);}
+    \node[lbl] at (3.45,0.85) {stream / polarization};
+    \node[lbl,below] at (1.6,-1.35) {\code{(B, P, n)}: MIMO, dual pol.};
+  \end{scope}
+  % grid
+  \begin{scope}[xshift=9.6cm]
+    \foreach \p in {2,1,0} {
+      \foreach \r in {0,...,3} \foreach \c in {0,...,5}
+        \draw[fill=kgrid!12,draw=kgrid!80] (\c*0.4+\p*0.22,-\r*0.4+\p*0.22) rectangle ++(0.4,0.4);}
+    \node[lbl,align=center] at (1.5,1.15) {OFDM symbols $\times$ subcarriers};
+    \node[lbl,below] at (1.4,-1.35) {\code{(B, S, N_FFT)}: resource grid};
+  \end{scope}
+\end{tikzpicture}
+\caption{Array conventions. Every block may assume that axis 0 is the batch and the last axis is
+time (or frequency for grids).}
+\label{fig:signal-shapes}
+\end{figure}
+
+\begin{table}[htbp]
+\centering\small
+\caption{Signal kinds. Kinds are bit flags, so a port can accept several of them
+(\code{Kind.BITS | Kind.LLR}). The colours are those used by the GUI.}
+\label{tab:kinds}
+\begin{tabular}{@{}lllp{6.8cm}@{}}
+\toprule
+Kind & & dtype & Meaning\\
+\midrule
+\kind{BITS}    & \textcolor{kbits}{\rule{8pt}{8pt}} & \code{uint8} & hard bits in $\{0,1\}$\\
+\kind{LLR}     & \textcolor{kllr}{\rule{8pt}{8pt}}  & \code{float64} & log-likelihood ratios, $L=\ln P(b{=}0)/P(b{=}1)$ (positive means 0)\\
+\kind{SYMBOLS} & \textcolor{ksym}{\rule{8pt}{8pt}}  & \code{complex128} & one sample per symbol (constellation domain)\\
+\kind{SAMPLES} & \textcolor{ksamp}{\rule{8pt}{8pt}} & \code{complex128}/\code{float64} & oversampled waveform; optical fields in $\sqrt{\mathrm{W}}$\\
+\kind{GRID}    & \textcolor{kgrid}{\rule{8pt}{8pt}} & \code{complex128} & OFDM resource grid (frequency domain)\\
+\kind{CSI}     & \textcolor{kcsi}{\rule{8pt}{8pt}}  & \code{complex128} & channel state information; the form is given by \meta{csi_type}\\
+\kind{FLAGS}   & \textcolor{black!50}{\rule{8pt}{8pt}} & \code{bool} & one flag per frame (e.g. CRC check)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Signals are never modified in place. A block derives a new signal with
+\code{x.evolve(new_data, key=value)}. This keeps the input's kind, rate and metadata and
+merges the new keys, so information added upstream is preserved unless a block deliberately
+overrides it.
+
+% ------------------------------------------------------------------
+\section{Blocks}\label{sec:blocks}
+A block (\file{core/block.py}) declares three things:
+\begin{itemize}
+  \item a \code{Params} model, a Pydantic class whose fields carry types, defaults, bounds
+  and descriptions;
+  \item named, typed \code{inputs} and \code{outputs} (\code{Port} objects);
+  \item a \code{process(inputs, ctx)} method mapping one batch of input signals to output
+  signals.
+\end{itemize}
+Measurement blocks also override \code{metrics()}.
+
+Ports carry the accepted (or produced) kinds, a \code{required} flag for inputs and, for
+outputs, an optional \code{same_as} reference: \code{Port.like("in")} produces the same kind
+as input \code{in}. The GUI uses this information to colour handles and to refuse invalid
+connections, and the graph validator uses it to propagate kinds (\cref{sec:validation}).
+
+\subsection{Life cycle}
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=6mm and 8mm]
+  \node[blockbox] (init) {\code{__init__}\\validate Params};
+  \node[blockbox,right=of init] (setup) {\code{setup()}\\derived state};
+  \node[blockbox,right=of setup] (reset) {\code{reset(seed, path)}\\RNG + \code{on_reset()}};
+  \node[greenbox,right=of reset] (proc) {\code{process()}\\one batch};
+  \node[blockbox,below=9mm of proc] (met) {\code{metrics()}};
+  \node[warmbox,below=9mm of setup] (setp) {\code{set_param()}};
+  \draw[sig] (init) -- (setup);
+  \draw[sig] (setup) -- (reset);
+  \draw[sig] (reset) -- (proc);
+  \draw[sig] (proc.north east) to[out=60,in=0,looseness=4] node[right,lbl]{next batch} (proc.east);
+  \draw[sig] (proc) -- node[right,lbl]{any time} (met);
+  \draw[sig] (setp) -- node[left,lbl]{rebuild} (setup);
+\end{tikzpicture}
+\caption{Block life cycle. \code{setup()} rebuilds derived state (filter taps, code matrices,
+trellises) after construction and after every parameter change. \code{on_reset()} clears
+accumulators before a run.}
+\label{fig:lifecycle}
+\end{figure}
+
+\subsection{Reproducible randomness}
+Every block owns a private NumPy generator. On reset it is re-seeded from the master seed of
+the run \emph{and} the block's hierarchical path:
+\codeexcerpt{block_reset}{Seeding the random generator of a block.}
+Because the CRC-32 of the path enters the seed sequence, two \blk{awgn} blocks named
+differently draw independent noise. The same graph with the same seed produces bit-identical
+results, whatever the execution order of unrelated blocks and whether the run starts from the
+GUI, the CLI or a script.
+
+% ------------------------------------------------------------------
+\section{The registry}
+\code{@register_block("type_name", category=...)} adds a class to a global registry
+(\file{core/registry.py}). Registered blocks can be created by name (\code{create_block},
+\code{Graph.create}) and are described by \code{block_catalogue()}. The catalogue contains
+the documentation, the ports and the JSON Schema of the parameters. The GUI builds its palette
+and its parameter forms from this catalogue, and \cref{app:blocks} of this manual is generated
+from it.
+
+% ------------------------------------------------------------------
+\section{Graphs}\label{sec:graphs}
+A \code{Graph} holds named blocks and edges. Edges are stored as a map
+$\text{destination input}\mapsto\text{source output}$, so every input has at most one driver,
+while an output may fan out to any number of inputs. Ports are addressed as
+\code{"block.port"}; omitting the port selects the block's first declared port, which makes
+\code{g.chain("src", "map", "awgn")} a compact way to wire a pipeline. Parameters are
+addressed as \code{"block.param"}, and \code{"/"} descends into subsystems
+(\code{"rx/demap.method"}).
+
+\subsection{Validation}\label{sec:validation}
+\code{Graph.validate()} enforces three rules and returns the resolved kind of every output:
+\begin{enumerate}
+  \item every \emph{required} input is driven, either by an edge or, inside a subsystem, by an
+  external input;
+  \item the graph is acyclic;
+  \item along every edge the produced kind intersects the accepted kinds.
+\end{enumerate}
+Kinds are resolved in topological order. An output declared with \code{same_as} takes the
+kind actually delivered to the referenced input, intersected with the kinds that input accepts.
+An \blk{interleaver} fed with LLRs therefore produces \kind{LLR}, and the validator can reject
+an LLR output connected to a block that only accepts symbols, before anything is executed.
+
+The topological order is computed with Kahn's algorithm:
+\codeexcerpt{graph_toposort}{Topological sort of the block graph.}
+Ties are broken by insertion order, so the execution order is deterministic. Feedback loops
+(PLLs, adaptive filters, decision feedback) live \emph{inside} blocks, where they can run at the
+sample rate. The graph itself carries one batch at a time from sources to sinks.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=6mm and 6mm]
+  \node[blockbox] (src) {src\\\scriptsize\color{accent2}1};
+  \node[blockbox,right=of src] (enc) {enc\\\scriptsize\color{accent2}2};
+  \node[blockbox,right=of enc] (map) {map\\\scriptsize\color{accent2}3};
+  \node[warmbox,right=of map] (ch) {ch\\\scriptsize\color{accent2}4};
+  \node[blockbox,right=of ch] (eq) {eq\\\scriptsize\color{accent2}5};
+  \node[blockbox,right=of eq] (dec) {dec\\\scriptsize\color{accent2}6};
+  \node[greenbox,right=of dec] (ber) {ber\\\scriptsize\color{accent2}7};
+  \draw[sig] (src)--(enc); \draw[sig] (enc)--(map); \draw[sig] (map)--(ch);
+  \draw[sig] (ch)--node[above,lbl]{out}(eq); \draw[sig] (eq)--(dec); \draw[sig] (dec)--node[above,lbl]{rx}(ber);
+  \draw[sig,kcsi] (ch.south) -- ++(0,-4mm) -| node[pos=0.25,below,lbl]{csi} (eq.south);
+  \draw[sig,kbits] (src.north) -- ++(0,5mm) -| node[pos=0.25,above,lbl]{tx} (ber.north);
+\end{tikzpicture}
+\caption{A graph with fan-out (\code{src.out} drives \code{enc.in} and \code{ber.tx}) and a
+side channel (\code{ch.csi}). Red numbers are the execution order.}
+\end{figure}
+
+\subsection{Execution}
+\code{Graph.execute(ctx)} walks the blocks in order, gathers their inputs from the signals
+already produced, checks the delivered kinds at run time and calls \code{process}:
+\codeexcerpt{graph_execute}{The core of the executor.}
+All produced signals are returned keyed by \code{"block.port"}; internal signals of
+subsystems appear as \code{"sub/block.port"}. These keys are what the GUI probes and what
+\code{Simulation.run(capture=...)} returns. Exceptions raised inside a block are re-raised as
+\code{BlockError} with the block name, so the user sees which block failed and why.
+
+% ------------------------------------------------------------------
+\section{Subsystems}\label{sec:subsystems}
+A \code{Subsystem} (\file{core/composite.py}) wraps a whole graph as a single block.
+Its ports map to chosen inner ports, and its output kinds are those resolved by validating the
+inner graph. A transmitter or a receiver can thus be built once and reused in many scenarios;
+the same mechanism will let a future network layer treat a whole PHY link as one node.
+Parameters and metrics of inner blocks are reached with the \code{"/"} separator:
+\code{rx/dec.max_iter}, \code{rx/dec/avg_iterations}.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=5mm and 7mm]
+  \node[blockbox] (src) {src};
+  \node[draw=accent4,dashed,rounded corners,inner sep=7pt,right=12mm of src,
+        label={[lbl,accent4]above:subsystem \code{tx} (file \file{coded_qam_tx.yaml})}] (tx) {
+    \tikz[node distance=5mm]{\node[blockbox,minimum width=10mm] (e) {enc}; \node[blockbox,minimum width=10mm,right=of e] (m) {map}; \draw[sig] (e)--(m);}};
+  \node[warmbox,right=12mm of tx] (ch) {awgn};
+  \node[draw=accent4,dashed,rounded corners,inner sep=7pt,right=12mm of ch,
+        label={[lbl,accent4]above:subsystem \code{rx}}] (rx) {
+    \tikz[node distance=5mm]{\node[blockbox,minimum width=10mm] (d) {demap}; \node[blockbox,minimum width=10mm,right=of d] (c) {dec}; \draw[sig] (d)--(c);}};
+  \draw[sig] (src) -- node[above,lbl]{bits} (tx);
+  \draw[sig] (tx) -- node[above,lbl]{symbols} (ch);
+  \draw[sig] (ch) -- (rx);
+\end{tikzpicture}
+\caption{Subsystems nest graphs; from outside they behave as ordinary blocks.}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Simulations and stop criteria}\label{sec:simulation}
+A \code{Simulation} (\file{core/simulation.py}) runs a graph batch after batch. One batch
+contains \code{batch_size} independent frames, which NumPy processes as a single vectorized
+operation, so a larger batch amortizes the Python overhead. Meter blocks accumulate counts
+across batches. The run stops at the first satisfied condition of a \code{StopCriteria}:
+\codeexcerpt{stop_check}{Stop criteria are checked after every batch.}
+The classic rule for error-rate estimation is \code{StopCriteria.errors("ber.bit_errors", 100)}:
+stop once 100 errors have been counted. \Cref{sec:mc} shows why this gives a relative
+accuracy of about $\pm20\,\%$ independent of the BER itself. \code{run} also accepts an
+\code{on_batch} callback, which the web server uses to report progress and to cancel jobs.
+
+% ------------------------------------------------------------------
+\section{Sweeps}\label{sec:sweeps}
+A \code{Sweep} (\file{core/sweep.py}) runs a fresh simulation at every point of a parameter
+grid. In \code{grid} mode the points are the Cartesian product of the value lists; in
+\code{zip} mode the lists are paired element-wise. It returns a table with one record per
+point, which can be filtered, printed or written to CSV.
+\codeexcerpt{sweep_point}{Each sweep point sets the parameters and runs a new simulation.}
+
+\begin{keypoint}[Common random numbers]
+By default every point reuses the same seed (\code{same_seed=True}). Two points then see the
+same bits and the same noise realizations, scaled differently. If $X$ and $Y$ are the estimates
+at two neighbouring points,
+\[
+  \Var(X-Y)=\Var X+\Var Y-2\operatorname{Cov}(X,Y),
+\]
+and the positive covariance created by shared randomness makes the \emph{differences} between
+points much less noisy. The curves look smooth and comparisons between configurations are
+fair. Use different seeds only when the points must be statistically independent.
+\end{keypoint}
+
+% ------------------------------------------------------------------
+\section{Metadata propagation}\label{sec:metadata}
+Physical quantities that a downstream block needs but cannot infer from the samples travel in
+\code{Signal.meta}. Examples:
+\begin{itemize}
+  \item the constellation used by the mapper;
+  \item the oversampling factor;
+  \item the nominal signal power;
+  \item the noise variance after equalization;
+  \item the accumulated chromatic dispersion of a fiber link.
+\end{itemize}
+Each block copies the metadata of its input and adds or overrides what it changes.
+\Cref{tab:meta-flow} follows the most important keys through a pulse-shaped link. The
+mechanism is what lets the \blk{awgn} block set $E_b/N_0$ correctly whatever comes before it,
+and lets a soft demapper compute exact LLRs without being told the SNR.
+\Cref{app:metadata} lists all keys.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Metadata along a pulse-shaped QPSK link with $N_{\mathrm{sps}}$ samples per symbol
+and $E_s/N_0=\gamma$. The waveform power is per sample; symbols have unit energy.}
+\label{tab:meta-flow}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+after block & \meta{power} & \meta{sps} & \meta{noise_var} & also sets\\
+\midrule
+\blk{mapper}         & 1 & 1 & -- & \meta{constellation}, \meta{bits_per_symbol}\\
+\blk{pulse_shaper}   & $1/N_{\mathrm{sps}}$ & $N_{\mathrm{sps}}$ & -- & \meta{pulse_taps}, \meta{delay}\\
+\blk{awgn} (\prm{esn0}) & $1/N_{\mathrm{sps}}$ & $N_{\mathrm{sps}}$ & $N_0=1/\gamma$ & \\
+\blk{matched_filter} & 1 & 1 & $1/\gamma$ & \meta{n_symbols}\\
+\blk{demapper}       & \multicolumn{4}{l}{uses \meta{constellation} and \meta{noise_var} for exact LLRs}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{pitfall}
+Metadata describes the \emph{nominal} signal. A block that changes the signal in a way it
+cannot describe (a CTLE, an unknown channel) sets the affected keys to \code{None}, and
+downstream blocks fall back to measuring. When you write a block, propagate or invalidate
+every key your processing changes.
+\end{pitfall}
+
+% ------------------------------------------------------------------
+\section{Scenarios}\label{sec:scenarios}
+A scenario (\file{core/scenario.py}) is a graph plus its run configuration, stored as YAML:
+\begin{lstlisting}[style=yaml]
+name: QPSK over AWGN
+category: Tutorials            # used by the GUI scenario browser
+description: ...
+seed: 1
+batch_size: 64
+blocks:
+  src:   {type: random_bits, params: {n_bits: 2000}}
+  map:   {type: mapper, params: {scheme: psk, order: 4}}
+  awgn:  {type: awgn, params: {snr_db: 6}}
+  demap: {type: demapper, params: {method: hard}}
+  ber:   {type: ber_meter}
+  rx:    {type: subsystem, file: subsystems/coded_qam_rx.yaml}   # optional
+chain: [src, map, awgn, demap, ber.rx]      # default-port connections
+edges:
+  - src.out -> ber.tx                        # explicit connections
+simulation: {stop: {metric: ber.bit_errors, threshold: 200, max_batches: 500}}
+sweep: {params: {awgn.snr_db: [0, 2, 4, 6, 8]}}   # optional: run a sweep instead
+probes: [{key: awgn.out, view: constellation}]   # GUI scopes
+layout: {src: [0, 0], map: [230, 0]}             # GUI positions
+\end{lstlisting}
+Files saved from the GUI contain only non-default parameters, so they stay short and readable
+and remain usable from the CLI. \Cref{app:scenarios} lists the scenarios shipped with LinkStudio.

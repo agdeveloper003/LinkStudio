@@ -1,0 +1,35 @@
+name: Coherent DP-16QAM metro link
+category: Optical
+description: 256 Gb/s dual-polarization 16-QAM over 5 x 80 km with polarization rotation, a
+  500 MHz LO offset and 100 kHz lasers. Blind phase search handles the 16-QAM carrier phase.
+seed: 3
+batch_size: 4
+blocks:
+  src: {type: random_bits, params: {n_bits: 16000}}
+  map: {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 32000000000.0}}
+  dmx: {type: stream_demux, params: {n_streams: 2}}
+  tx: {type: pulse_shaper, params: {sps: 2, rolloff: 0.1, span: 32}}
+  mod: {type: iq_modulator, params: {power_dbm: 0.0, linewidth_hz: 100000.0}}
+  link: {type: optical_link, params: {n_spans: 5, span_km: 80.0, polarization_rotation: true}}
+  rx: {type: coherent_receiver, params: {frequency_offset_hz: 500000000.0, lo_linewidth_hz: 100000.0}}
+  cdc: {type: cd_compensation}
+  fo: {type: fo_compensation}
+  mf: {type: matched_filter, params: {decimate: false}}
+  agc: {type: agc, params: {remove_dc: false}}
+  eq: {type: adaptive_mimo_equalizer, params: {n_train: 1024}}
+  cpr: {type: phase_recovery, params: {ref_start: 1100}}
+  mux: {type: stream_mux}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter, params: {skip_bits: 9000}}
+  evm: {type: evm_meter, params: {skip_symbols: 2400}}
+chain: [src, map, dmx, tx, mod, link, rx, cdc, fo, mf, agc, eq, cpr, mux, demap, ber.rx]
+edges:
+  - dmx.out -> eq.ref
+  - dmx.out -> cpr.ref
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - mux.out -> evm.in
+probes:
+  - {key: mf.out, view: constellation}
+  - {key: eq.out, view: constellation}
+  - {key: cpr.out, view: constellation}

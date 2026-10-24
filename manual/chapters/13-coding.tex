@@ -1,0 +1,290 @@
+\chapter{Channel coding}\label{ch:coding}
+
+Channel coding adds structured redundancy so that the receiver can detect and correct errors.
+\Cref{fig:coding-chain} shows the coding blocks of \file{phy/coding/}. They can be combined
+freely. Every encoder multiplies the \meta{code_rate} metadata by its own rate, including tail
+bits and CRC overhead, so the \blk{awgn} block always refers $E_b/N_0$ to the
+\emph{information} bits (\cref{eq:ebn0}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=3mm and 3.5mm,every node/.style={font=\sffamily\scriptsize}]
+  \node[blockbox,minimum width=12mm] (s) {source};
+  \node[greenbox,right=of s,minimum width=12mm] (crc) {CRC};
+  \node[greenbox,right=of crc,minimum width=12mm] (scr) {scrambler};
+  \node[greenbox,right=of scr,minimum width=12mm] (enc) {FEC\\encoder};
+  \node[greenbox,right=of enc,minimum width=12mm] (pun) {puncturer};
+  \node[greenbox,right=of pun,minimum width=12mm] (il) {interleaver};
+  \node[blockbox,right=of il,minimum width=12mm] (map) {mapper};
+  \node[warmbox,below=7mm of map,minimum width=12mm] (ch) {channel};
+  \node[blockbox,left=of ch,minimum width=12mm] (dm) {soft\\demapper};
+  \node[greenbox,left=of dm,minimum width=12mm] (dil) {de-inter-\\leaver};
+  \node[greenbox,left=of dil,minimum width=12mm] (dpun) {depunc-\\turer};
+  \node[greenbox,left=of dpun,minimum width=12mm] (dec) {FEC\\decoder};
+  \node[greenbox,left=of dec,minimum width=12mm] (dscr) {descr.};
+  \node[greenbox,left=of dscr,minimum width=12mm] (dcrc) {CRC\\check};
+  \draw[sig,kbits] (s)--(crc); \draw[sig,kbits] (crc)--(scr); \draw[sig,kbits] (scr)--(enc);
+  \draw[sig,kbits] (enc)--(pun); \draw[sig,kbits] (pun)--(il); \draw[sig,kbits] (il)--(map);
+  \draw[sig] (map)--(ch); \draw[sig] (ch)--(dm); \draw[sig,kllr] (dm)--(dil); \draw[sig,kllr] (dil)--(dpun);
+  \draw[sig,kllr] (dpun)--(dec); \draw[sig,kbits] (dec)--(dscr); \draw[sig,kbits] (dscr)--(dcrc);
+\end{tikzpicture}
+\caption{A complete coded chain. Purple edges carry bits, pink edges LLRs. The scrambler and the
+interleaver are their own inverses (\prm{inverse}\code{=true} for the interleaver).}
+\label{fig:coding-chain}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{Cyclic redundancy check}
+A CRC with generator polynomial $g(x)$ of degree $r$ appends the remainder
+$p(x)=x^r u(x)\bmod g(x)$ to the message $u(x)$; the receiver recomputes it and compares.
+Because polynomial division over GF(2) is linear, the parity is a linear function of the
+message, $\vect p=\vect u\mat P\bmod 2$. Row $i$ of $\mat P$ is the remainder of the monomial
+$x^{k-1-i+r}$. Computing all of them once turns CRC encoding and checking of a whole batch
+into a single integer matrix product.
+\codeexcerpt{crc_matrix}{The CRC parity matrix, built once per frame length and cached.}
+A CRC of degree $r$ detects all error bursts of length $\le r$. It misses a random error
+pattern with probability $\approx2^{-r}$. \blk{crc_decoder} reports \code{bler}, the block error
+rate detected by the CRC, and outputs a validity flag per frame. CRC-8, CRC-16-CCITT, LTE
+CRC-24A and IEEE 802.3 CRC-32 are available.
+
+% ------------------------------------------------------------------
+\section{LFSR sequences and scrambling}
+A linear feedback shift register produces $s[k]=\bigoplus_{t\in\mathcal T}s[k-t]$. When the
+feedback polynomial $1+\sum_{t\in\mathcal T}x^t$ is primitive of degree $m$, the sequence is an
+$m$-sequence of period $2^m-1$ with nearly ideal autocorrelation. The \blk{prbs} source
+(PRBS-7 to PRBS-31, ITU-T O.150) and the additive \blk{scrambler} (default $x^7+x^4+1$, IEEE
+802.11) are built on it. Since every output bit depends only on bits at least
+$\min\mathcal T$ positions back, chunks of that many bits can be computed with vector operations:
+\codeexcerpt{lfsr}{Vectorized LFSR generation (\file{dsp/lfsr.py}).}
+Scrambling is a XOR with the sequence and is its own inverse. On LLRs, descrambling flips the
+sign of the affected values. The self-synchronizing $x^{58}+x^{39}+1$ scrambler of 64B/66B is
+described in \cref{sec:line-codes}.
+
+% ------------------------------------------------------------------
+\section{Interleaving}
+Fading and decoders both produce errors in bursts, while most codes are designed for
+independent errors. An interleaver permutes the coded bits, and the de-interleaver applies the
+inverse permutation, so a burst on the channel is spread over many codewords. The
+\prm{block} interleaver writes row by row into an $R\times(n/R)$ matrix and reads column by
+column. The \prm{random} interleaver applies a seeded pseudo-random permutation.
+
+% ------------------------------------------------------------------
+\section{Block codes: repetition and Hamming}
+The repetition code sends every bit $n$ times. Its soft decoder simply adds the $n$ LLRs. The
+Hamming code $(2^m-1,2^m-1-m)$ has as parity-check matrix $\mat H$ all non-zero $m$-bit columns,
+arranged so that the code is systematic. A single error in position $j$ produces the syndrome
+$\vect s=\mat H\vect e\T=\vect h_j$, which identifies the position; a lookup table maps each
+syndrome to the bit to flip. Decoding errors occur with $\ge2$ channel errors; the approximation
+\begin{equation}
+  P_b\approx\frac1n\sum_{j=2}^{n}(j+1)\binom nj p^j(1-p)^{n-j},\qquad p=\Q\Big(\sqrt{2R\,E_b/N_0}\Big),
+\end{equation}
+counts the $j$ channel errors plus at most one wrong correction (\code{ber_hamming_hard}).
+
+% ------------------------------------------------------------------
+\section{Convolutional codes and the Viterbi algorithm}\label{sec:conv}
+\subsection{Encoder and trellis}
+A rate-$1/n$ feed-forward convolutional encoder with constraint length $K$ computes $n$ output
+bits per input bit,
+\begin{equation}
+  c_j[t]=\bigoplus_{i=0}^{K-1}g_{j,i}\,u[t-i],\qquad j=1,\dots,n,
+\end{equation}
+with generators given in octal: $(171,133)_8$ is the industry-standard $K=7$ code of IEEE
+802.11, DVB and many others, with free distance $d_{\mathrm{free}}=10$. The encoder state is
+the last $K-1$ input bits, giving $2^{K-1}$ states. Appending $K-1$ zeros (\prm{terminate})
+returns the trellis to state 0.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=2.1cm,y=0.95cm]
+  \foreach \t in {0,...,4} {
+    \foreach \s/\lab in {0/00,1/01,2/10,3/11} \node[dot] (n\t\s) at (\t,-\s) {};
+    \node[lbl,above] at (\t,0.25) {$t=\t$};}
+  \foreach \s/\lab in {0/00,1/01,2/10,3/11} \node[lbl,left] at (-0.1,-\s) {\lab};
+  \foreach \t [evaluate=\t as \u using int(\t+1)] in {0,...,3} {
+    % input 0 (solid), input 1 (dashed); state = (u[t-1], u[t-2]) MSB = most recent
+    \draw[accent,thin] (n\t0)--(n\u0); \draw[accent2,thin,dashed] (n\t0)--(n\u2);
+    \draw[accent,thin] (n\t1)--(n\u0); \draw[accent2,thin,dashed] (n\t1)--(n\u2);
+    \draw[accent,thin] (n\t2)--(n\u1); \draw[accent2,thin,dashed] (n\t2)--(n\u3);
+    \draw[accent,thin] (n\t3)--(n\u1); \draw[accent2,thin,dashed] (n\t3)--(n\u3);}
+  \draw[accent3,line width=1.6pt] (n00)--(n12)--(n23)--(n31)--(n40);
+  \node[lbl,right] at (4.1,-0.0) {survivor};
+  \draw[accent,thin] (4.6,-2.2)--(4.9,-2.2) node[right,lbl]{$u=0$};
+  \draw[accent2,thin,dashed] (4.6,-2.8)--(4.9,-2.8) node[right,lbl]{$u=1$};
+\end{tikzpicture}
+\caption{Trellis of the $K=3$, $(7,5)_8$ code (4 states, MSB = most recent input). The Viterbi
+algorithm keeps one survivor path per state and time; the green path is the decoded sequence
+\code{1 1 0 0}.}
+\label{fig:trellis}
+\end{figure}
+
+\subsection{Maximum-likelihood sequence decoding}
+Given channel LLRs $L_{t,j}$ for the coded bits, the log-likelihood of a candidate codeword is,
+up to a constant,
+\begin{equation}
+  \ln p(\vect y\,|\,\vect c)=\sum_{t,j}\frac{L_{t,j}}{2}(1-2c_{t,j})+\text{const},
+\end{equation}
+a \emph{correlation} metric. The Viterbi algorithm maximizes it over all paths of the trellis
+by dynamic programming. At each time, for every state it keeps the better of the two incoming
+paths (add--compare--select) and stores the decision. A traceback from state 0 (terminated
+trellis) recovers the input bits. Path metrics are renormalized every step to avoid overflow.
+\codeexcerpt{viterbi}{Viterbi decoding vectorized over states and frames (\code{Trellis.decode}).}
+With hard decisions (bit inputs) the metric degenerates to the Hamming distance, losing about
+2\,dB (\file{tests/test_physics.py::test_conv_coded_soft_vs_hard}). The asymptotic coding gain
+of soft decoding is $10\log_{10}(R\,d_{\mathrm{free}})=7$\,dB for the $K=7$ code.
+
+\subsection{Puncturing}
+Deleting coded bits periodically raises the rate without a new decoder. The default pattern
+\code{[1,1,1,0,0,1]} turns the rate-1/2 code into rate 3/4, as in IEEE 802.11. The
+depuncturer reinserts the deleted positions as erasures ($L=0$, no information) before
+decoding. When the original length is not available in the metadata, it is inferred as the
+shortest mother length whose pattern keeps exactly the received number of bits.
+\codeexcerpt{depuncture}{Erasure insertion (\blk{depuncturer}).}
+
+% ------------------------------------------------------------------
+\section{LDPC codes}\label{sec:ldpc}
+\subsection{Structure}
+A low-density parity-check code~\cite{gallager1962} is the null space of a sparse matrix $\mat H\in\{0,1\}^{m\times n}$:
+$\mat H\vect c\T=\vect0$. Its Tanner graph has a variable node per code bit and a check node per
+row (\cref{fig:tanner}). LinkStudio builds quasi-cyclic codes in the style of IEEE 802.11n and 5G
+NR: $\mat H$ is an array of $z\times z$ circulant permutation matrices (or zero blocks), described
+by a base matrix of shifts (\cref{fig:ldpc-base}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1.15cm,y=1cm]
+  \foreach \i in {1,...,8} \node[circle,draw=accent,fill=soft,minimum size=6mm,inner sep=0pt,font=\scriptsize] (v\i) at (\i,0) {$c_\i$};
+  \foreach \j in {1,...,4} \node[rectangle,draw=accent2,fill=softwarm,minimum size=6mm,font=\scriptsize] (c\j) at (2*\j-0.5,2) {$\oplus$};
+  \foreach \j/\list in {1/{1,2,4,5},2/{2,3,6,7},3/{1,3,5,8},4/{4,6,7,8}}
+    \foreach \i in \list \draw[black!50] (c\j.south)--(v\i.north);
+  \draw[->,accent3,thick] (v5.north east) .. controls +(0.4,0.7) .. node[right,lbl]{$L_{v\to c}$} ($(c3.south)+(0.15,0)$);
+  \node[lbl,right] at (8.5,0) {variable nodes};
+  \node[lbl,right] at (8.5,2) {check nodes};
+\end{tikzpicture}
+\caption{A Tanner graph. Belief propagation exchanges messages along the edges: variables tell
+checks what they believe, checks reply with what the other bits imply.}
+\label{fig:tanner}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[infoblk/.style={draw=accent,fill=soft,minimum size=5.6mm,inner sep=0pt},
+  parblk/.style={draw=accent3,fill=softgreen,minimum size=5.6mm,inner sep=0pt},
+  zeroblk/.style={draw=black!12,fill=white,minimum size=5.6mm,inner sep=0pt}]
+  \input{generated/ldpc_base.tex}
+  \draw[decorate,decoration={brace,amplitude=5pt}] (-0.3,0.45) -- node[above=5pt,lbl]{information part $\mat H_i$ ($k_b=8$ block columns)} (4.64,0.45);
+  \draw[decorate,decoration={brace,amplitude=5pt}] (4.66,0.45) -- node[above=5pt,lbl]{parity part $\mat H_p$ (dual diagonal)} (9.6,0.45);
+\end{tikzpicture}
+\caption{Base matrix of the default code ($k_b=m_b=8$, $z=48$, rate 1/2, $n=768$), read back from
+\code{QCLDPCCode.H}. Each number is the cyclic shift of a $48\times48$ identity; empty cells are
+zero blocks. Every information column has weight 3.}
+\label{fig:ldpc-base}
+\end{figure}
+
+\subsection{Encoding by accumulation}
+Split $\mat H=[\mat H_i\,|\,\mat H_p]$ and the codeword $\vect c=[\vect u\,|\,\vect p]$. The
+parity part is block dual-diagonal: identities on the diagonal and on the sub-diagonal. The
+parity equations $\mat H_i\vect u\T\oplus\mat H_p\vect p\T=\vect0$ then read, block by block,
+\begin{equation}
+  \vect p_0=\vect s_0,\qquad \vect p_j=\vect p_{j-1}\oplus\vect s_j,\qquad \vect s=\mat H_i\vect u\T ,
+\end{equation}
+so the parity is a cumulative XOR of the syndrome blocks. Encoding costs one sparse product and
+needs no Gaussian elimination. The dual-diagonal structure also guarantees that $\mat H$ has
+full rank.
+\codeexcerpt{ldpc_encode}{Systematic QC-LDPC encoding.}
+
+\subsection{Belief-propagation decoding}
+With channel LLRs $L_v$, the flooding schedule alternates two updates.
+\begin{align}
+  \text{variable to check:}\quad & L_{v\to c}=L_v+\sum_{c'\in\mathcal N(v)\setminus c}L_{c'\to v},\\
+  \text{check to variable:}\quad & L_{c\to v}=2\tanh^{-1}\!\prod_{v'\in\mathcal N(c)\setminus v}\tanh\frac{L_{v'\to c}}{2}
+  \quad\text{(sum-product)},\\
+  & L_{c\to v}\approx\alpha\prod_{v'}\sgn(L_{v'\to c})\cdot\min_{v'\in\mathcal N(c)\setminus v}|L_{v'\to c}|
+  \quad\text{(normalized min-sum)}.
+\end{align}
+The min-sum rule only needs, for each check, the two smallest input magnitudes: the output to
+the edge holding the minimum is the second minimum, and to all others the minimum. The factor
+$\alpha\approx0.8$ compensates its overestimation of reliabilities. After every iteration the
+hard decisions are tested against the syndrome. Frames that satisfy it stop early, and the
+average number of iterations is reported as a metric.
+\codeexcerpt{ldpc_minsum}{The normalized min-sum check-node update, vectorized over all checks of all frames.}
+The message passing is vectorized with a padded table of the edges of every check node
+(irregular row weights are padded with neutral entries) and sparse incidence matrices for the
+variable-node sums.
+
+% ------------------------------------------------------------------
+\section{Polar codes}\label{sec:polar}
+\subsection{Channel polarization}
+Arıkan's transform~\cite{arikan2009} $\vect x=\vect u\mat G_N$, with
+$\mat G_N=\begin{bsmallmatrix}1&0\\1&1\end{bsmallmatrix}^{\otimes n}$, $N=2^n$, combines $N$
+uses of a channel $W$ into $N$ synthetic channels $W_N^{(i)}$ seen by the bits $u_i$ under
+successive decoding. As $N$ grows they polarize: a fraction tends to noiseless channels, and the
+rest to useless ones. One step splits a channel with Bhattacharyya parameter $Z$ into a worse
+and a better one,
+\begin{equation}
+  Z(W^-)\le2Z-Z^2,\qquad Z(W^+)=Z^2 .
+\end{equation}
+Starting from $Z=e^{-E_s/N_0}$ (BPSK over AWGN at the \prm{design_snr_db}) and applying the
+recursion $n$ times ranks the synthetic channels. The $K$ best carry information and the others
+are \emph{frozen} to 0.
+\codeexcerpt{polar_rel}{Reliability ranking by the Bhattacharyya recursion.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[width=11cm,height=5cm,xlabel={synthetic channel index $i$},ylabel={$Z(W_N^{(i)})$},
+  xmin=-1,xmax=64,ymin=1e-12,ymax=2,legend pos=south west]
+  \addplot[sim={accent2,mark=x,mark size=2pt}] table[x=i,y=z]{\datafile{polar_frozen}};
+  \addplot[sim=accent3] table[x=i,y=z]{\datafile{polar_info}};
+  \legend{frozen,information}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{Polarization for $N=64$, $K=32$ at a design SNR of 0\,dB (\code{reliability},
+\code{frozen_mask}). Reliable channels concentrate at high indices, the frozen set at low
+indices.}
+\label{fig:polar}
+\end{figure}
+
+\subsection{Encoding and successive-cancellation decoding}
+Without bit reversal, $\vect u=[\vect u_a,\vect u_b]$ encodes recursively as
+$\vect x=[\mathrm{enc}(\vect u_a)\oplus\mathrm{enc}(\vect u_b),\ \mathrm{enc}(\vect u_b)]$,
+computed in place with $\log_2N$ butterfly stages:
+\codeexcerpt{polar_encode}{The polar transform in $\log_2 N$ vectorized stages.}
+The SC decoder follows the same recursion on LLRs. For the halves $\vect L_1,\vect L_2$,
+\begin{equation}
+  f(a,b)=\sgn a\,\sgn b\,\min(|a|,|b|)\ \ (\text{left child}),\qquad
+  g(a,b,\hat x)=b+(1-2\hat x)\,a\ \ (\text{right child}).
+\end{equation}
+The left half is decoded first; its re-encoded decisions $\hat{\vect x}_a$ enter the right half.
+Subtrees made only of frozen bits return zeros immediately, and subtrees made only of
+information bits (rate-1 nodes) are decided by a direct hard decision. Both shortcuts are exact.
+\codeexcerpt{polar_sc}{Recursive SC decoding with rate-0 and rate-1 node shortcuts.}
+
+% ------------------------------------------------------------------
+\section{Comparison}
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[berplot,width=9.6cm,height=7.5cm,xmin=0,xmax=10,ymin=1e-6,ymax=0.5,
+  legend style={at={(1.03,1)},anchor=north west}]
+  \addplot[th=black!60] table[x=ebn0,y=uncoded]{\datafile{coding_theory}};
+  \addplot[th=accent4,dashed] table[x=ebn0,y=hamming]{\datafile{coding_theory}};
+  \addplot[sim=accent4] table[x=ebn0,y=hamming]{\datafile{coding_sim}};
+  \addplot[simline={accent}] table[x=ebn0,y=conv]{\datafile{coding_sim}};
+  \addplot[simline={accent3,mark=square*}] table[x=ebn0,y=polar]{\datafile{coding_sim}};
+  \addplot[simline={accent2,mark=triangle*}] table[x=ebn0,y=ldpc]{\datafile{coding_sim}};
+  \legend{uncoded (theory),{Hamming(7,4) hard (approx.)},{Hamming(7,4) simulated},
+    conv. $K{=}7$ soft Viterbi,polar $N{=}256$ SC,QC-LDPC $n{=}768$ min-sum}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{QPSK over AWGN with the codes of this chapter (rate $\approx1/2$ except Hamming 4/7;
+max-log LLRs; simulated with the real blocks, up to 200 errors or 20 batches per point). At
+$10^{-4}$ the Hamming code gains well under 1\,dB with hard decisions, while the convolutional and
+LDPC codes gain about 5 and 5.5\,dB.}
+\label{fig:coding}
+\end{figure}
+
+\begin{keypoint}
+Soft decisions are worth about 2\,dB, and iterative decoding of long sparse codes approaches
+capacity. The rate-1/2 limit for binary-input AWGN is 0.19\,dB. The 768-bit LDPC code is about
+3\,dB away at $10^{-5}$; longer codes get closer.
+\end{keypoint}

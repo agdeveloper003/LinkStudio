@@ -1,0 +1,240 @@
+% =====================================================================
+%  LinkStudio manual - preamble (packages, styles, macros)
+% =====================================================================
+\PassOptionsToPackage{obeyspaces,spaces}{url}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper,top=27mm,bottom=27mm,inner=28mm,outer=24mm,headheight=14pt]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm,bm,mathtools}
+\usepackage{siunitx}
+\sisetup{per-mode=symbol,group-separator={\,},range-phrase=--}
+\usepackage{booktabs,longtable,array,tabularx,multirow}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{caption,subcaption}
+\captionsetup{font=small,labelfont=bf,format=hang,justification=raggedright,singlelinecheck=true}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,shapes.misc,fit,backgrounds,
+  decorations.pathreplacing,decorations.markings,matrix,patterns}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots,fillbetween}
+\usepackage{listings}
+\usepackage[most]{tcolorbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage[nameinlink,capitalise,noabbrev]{cleveref}
+
+% ------------------------------------------------------------- colours
+\definecolor{ink}{HTML}{1F2933}
+\definecolor{accent}{HTML}{1D4E89}
+\definecolor{accent2}{HTML}{C8553D}
+\definecolor{accent3}{HTML}{2A9D8F}
+\definecolor{accent4}{HTML}{8E5DB5}
+\definecolor{accent5}{HTML}{E9A23B}
+\definecolor{soft}{HTML}{EEF3F9}
+\definecolor{softwarm}{HTML}{FBF1EC}
+\definecolor{softgreen}{HTML}{EAF6F4}
+\definecolor{codebg}{HTML}{F7F8FA}
+\definecolor{codeframe}{HTML}{D5DBE3}
+\definecolor{kwcolor}{HTML}{1D4E89}
+\definecolor{strcolor}{HTML}{A23E48}
+\definecolor{commentcolor}{HTML}{6B7785}
+% signal-kind colours (same as the GUI)
+\definecolor{kbits}{HTML}{8E5DB5}
+\definecolor{kllr}{HTML}{D6589F}
+\definecolor{ksym}{HTML}{2A9D8F}
+\definecolor{ksamp}{HTML}{1D6FB8}
+\definecolor{kgrid}{HTML}{E9A23B}
+\definecolor{kcsi}{HTML}{C8553D}
+
+% ------------------------------------------------------------- headings
+\titleformat{\chapter}[display]
+  {\normalfont\sffamily\color{accent}}
+  {\large\scshape Chapter \thechapter}{4pt}
+  {\Huge\bfseries}[\vspace{2pt}{\color{accent}\titlerule[0.8pt]}]
+\titlespacing*{\chapter}{0pt}{-10pt}{24pt}
+\titleformat{\part}[display]
+  {\normalfont\sffamily\centering\color{accent}}
+  {\Large\scshape Part \thepart}{8pt}
+  {\Huge\bfseries}
+\titleformat{\section}{\normalfont\sffamily\Large\bfseries\color{ink}}{\color{accent}\thesection}{0.8em}{}
+\titleformat{\subsection}{\normalfont\sffamily\large\bfseries\color{ink}}{\color{accent}\thesubsection}{0.8em}{}
+\titleformat{\subsubsection}{\normalfont\sffamily\normalsize\bfseries\color{ink}}{}{0em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\sffamily\small\color{commentcolor}\leftmark}
+\fancyhead[RO]{\sffamily\small\color{commentcolor}\rightmark}
+\fancyfoot[C]{\sffamily\small\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+% ------------------------------------------------------------- theorems
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[chapter]
+\newtheorem{proposition}{Proposition}[chapter]
+\newtheorem{example}{Example}[chapter]
+\theoremstyle{remark}
+\newtheorem*{remark}{Remark}
+
+% ------------------------------------------------------------- code
+\lstdefinestyle{py}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize\color{ink},
+  keywordstyle=\color{kwcolor}\bfseries,
+  stringstyle=\color{strcolor},
+  commentstyle=\color{commentcolor}\itshape,
+  numbers=left, numberstyle=\tiny\color{commentcolor}, numbersep=6pt,
+  backgroundcolor=\color{codebg},
+  frame=single, rulecolor=\color{codeframe}, framesep=3pt,
+  xleftmargin=16pt, framexleftmargin=14pt,
+  breaklines=true, breakatwhitespace=false, columns=fullflexible, keepspaces=true,
+  showstringspaces=false, tabsize=4, upquote=true,
+  captionpos=t, abovecaptionskip=2pt, belowcaptionskip=4pt,
+  morekeywords={self,None,True,False},
+  literate={π}{{$\pi$}}1 {β}{{$\beta$}}1 {—}{{--}}1
+}
+\lstdefinestyle{yaml}{
+  basicstyle=\ttfamily\footnotesize\color{ink},
+  backgroundcolor=\color{codebg}, frame=single, rulecolor=\color{codeframe},
+  breaklines=true, columns=fullflexible, keepspaces=true, showstringspaces=false,
+  commentstyle=\color{commentcolor}\itshape, morecomment=[l]{\#},
+  captionpos=t
+}
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize\color{ink},
+  backgroundcolor=\color{codebg}, frame=single, rulecolor=\color{codeframe},
+  columns=fullflexible, keepspaces=true, showstringspaces=false, captionpos=t
+}
+\lstset{style=py}
+\renewcommand{\lstlistingname}{Code}
+\renewcommand{\lstlistlistingname}{List of code excerpts}
+\crefname{lstlisting}{Code}{Code}
+\Crefname{lstlisting}{Code}{Code}
+
+% Excerpts are extracted from the code base by tools/generate.py.
+% \snipdef{name}{file}{first}{last} is written to generated/snippets.tex.
+\makeatletter
+\newcommand{\snipdef}[4]{%
+  \expandafter\xdef\csname snipfile@#1\endcsname{\detokenize{#2}}%
+  \expandafter\gdef\csname snipfirst@#1\endcsname{#3}%
+  \expandafter\gdef\csname sniplast@#1\endcsname{#4}}
+\newcommand{\snipsource}[1]{%
+  \texttt{\csname snipfile@#1\endcsname}, lines
+  \csname snipfirst@#1\endcsname--\csname sniplast@#1\endcsname}
+% \codeexcerpt{name}{caption}
+\newcommand{\codeexcerpt}[2]{%
+  \edef\snip@first{\csname snipfirst@#1\endcsname}%
+  \lstinputlisting[style=py,firstnumber=\snip@first,label={lst:#1},
+    caption={#2\hfill{\normalfont\footnotesize\color{commentcolor}\snipsource{#1}}}]
+    {generated/snippets/#1.py}}
+\makeatother
+\input{generated/snippets.tex}
+\input{generated/count_blocks.tex}
+\input{generated/count_scenarios.tex}
+\input{generated/dmt_rates.tex}
+\input{generated/fiber_ld.tex}
+\input{generated/soliton.tex}
+
+% ------------------------------------------------------------- boxes
+\newtcolorbox{incode}[1][]{enhanced,breakable,colback=soft,colframe=accent,boxrule=0pt,
+  leftrule=2.5pt,arc=0pt,outer arc=0pt,left=8pt,right=8pt,top=5pt,bottom=5pt,
+  fonttitle=\sffamily\bfseries\small,coltitle=accent,colbacktitle=soft,
+  title={In the code#1},attach title to upper={\quad},before skip=8pt,after skip=8pt}
+\newtcolorbox{keypoint}[1][Key idea]{enhanced,breakable,colback=softgreen,colframe=accent3,boxrule=0pt,
+  leftrule=2.5pt,arc=0pt,outer arc=0pt,left=8pt,right=8pt,top=5pt,bottom=5pt,
+  fonttitle=\sffamily\bfseries\small,coltitle=accent3,colbacktitle=softgreen,
+  title={#1},attach title to upper={\quad},before skip=8pt,after skip=8pt}
+\newtcolorbox{pitfall}[1][Watch out]{enhanced,breakable,colback=softwarm,colframe=accent2,boxrule=0pt,
+  leftrule=2.5pt,arc=0pt,outer arc=0pt,left=8pt,right=8pt,top=5pt,bottom=5pt,
+  fonttitle=\sffamily\bfseries\small,coltitle=accent2,colbacktitle=softwarm,
+  title={#1},attach title to upper={\quad},before skip=8pt,after skip=8pt}
+
+% ------------------------------------------------------------- inline names
+% Inline code names use the url machinery on detokenized text: special characters print
+% verbatim, long names can break after / _ . = , and the commands are robust (usable in
+% captions). Braces must be balanced.
+\makeatletter
+\DeclareUrlCommand\cs@tt{\urlstyle{tt}}
+\g@addto@macro\UrlBreaks{\do\_\do\.\do\=\do\,}
+\DeclareRobustCommand{\code}[1]{\expandafter\cs@tt\expandafter{\detokenize{#1}}}
+\DeclareRobustCommand{\file}[1]{\expandafter\cs@tt\expandafter{\detokenize{#1}}}
+\DeclareRobustCommand{\blk}[1]{\textcolor{accent}{\code{#1}}}          % block type
+\DeclareRobustCommand{\prm}[1]{\textcolor{accent2!85!black}{\code{#1}}}% parameter
+\DeclareRobustCommand{\meta}[1]{\textcolor{accent4}{\code{#1}}}        % metadata key
+\makeatother
+\newcommand{\kind}[1]{\textsf{\small #1}}
+
+% ------------------------------------------------------------- maths
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\CN}{\mathcal{CN}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\Q}{\operatorname{Q}}
+\newcommand{\erfc}{\operatorname{erfc}}
+\newcommand{\sinc}{\operatorname{sinc}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\sgn}{\operatorname{sgn}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\EsNo}{E_s/N_0}
+\newcommand{\EbNo}{E_b/N_0}
+\newcommand{\dB}{\,\mathrm{dB}}
+\newcommand{\T}{^{\mathsf{T}}}
+\newcommand{\Her}{^{\mathsf{H}}}
+\newcommand{\conj}{^{*}}
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\mat}[1]{\mathbf{#1}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+% ------------------------------------------------------------- TikZ styles
+\tikzset{
+  >={Latex[length=2mm]},
+  blockbox/.style={draw=accent,fill=soft,rounded corners=2pt,minimum height=8mm,minimum width=16mm,
+    align=center,font=\sffamily\footnotesize,inner sep=3pt},
+  warmbox/.style={blockbox,draw=accent2,fill=softwarm},
+  greenbox/.style={blockbox,draw=accent3,fill=softgreen},
+  greybox/.style={blockbox,draw=black!40,fill=black!4},
+  sumnode/.style={draw=accent,fill=white,circle,inner sep=0pt,minimum size=5mm,font=\footnotesize},
+  mulnode/.style={draw=accent,fill=white,circle,inner sep=0pt,minimum size=5mm,font=\footnotesize,
+    path picture={\draw[accent] (path picture bounding box.south east)--(path picture bounding box.north west)
+    (path picture bounding box.south west)--(path picture bounding box.north east);}},
+  sig/.style={->,thick,color=ink},
+  lbl/.style={font=\scriptsize\sffamily,color=ink},
+  note/.style={font=\scriptsize\itshape,color=commentcolor,align=center},
+  layer/.style={draw=#1,fill=#1!7,rounded corners=4pt,inner sep=6pt},
+  dot/.style={circle,fill=ink,inner sep=0pt,minimum size=3pt},
+}
+
+% ------------------------------------------------------------- pgfplots styles
+\pgfplotscreateplotcyclelist{linkstudio}{
+  {accent,thick},{accent2,thick},{accent3,thick},{accent4,thick},{accent5,thick},{black!60,thick}}
+\pgfplotsset{
+  every axis/.append style={font=\footnotesize,
+    grid=both, major grid style={black!14}, minor grid style={black!6},
+    legend style={font=\scriptsize,draw=black!20,fill=white,fill opacity=0.9,text opacity=1},
+    tick label style={font=\scriptsize}, label style={font=\footnotesize},
+    cycle list name=linkstudio, unbounded coords=jump, axis line style={black!60}},
+  sim/.style={only marks,mark=*,mark size=1.6pt,#1},
+  th/.style={no marks,thick,#1},
+  simline/.style={thick,mark=*,mark size=1.5pt,#1},
+  scatterpts/.style={only marks,mark=*,mark size=0.35pt,#1},
+  berplot/.style={xlabel={$E_b/N_0$ [dB]},ylabel={BER},
+    yticklabel style={font=\scriptsize}, legend pos=south west},
+  constaxis/.style={width=4.4cm,height=4.4cm,axis equal image,xmin=-1.6,xmax=1.6,ymin=-1.6,ymax=1.6,
+    xtick={-1,0,1},ytick={-1,0,1},grid=major,title style={font=\scriptsize\sffamily}},
+}
+\newcommand{\datafile}[1]{generated/data/#1.dat}
+
+% ------------------------------------------------------------- misc
+\setcounter{tocdepth}{1}
+\setcounter{secnumdepth}{2}
+\renewcommand{\arraystretch}{1.15}
+\hypersetup{pdftitle={LinkStudio - Theory and User Manual},pdfauthor={LinkStudio project}}

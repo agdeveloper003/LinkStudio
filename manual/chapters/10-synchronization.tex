@@ -1,0 +1,188 @@
+\chapter{Synchronization}\label{ch:sync}
+
+A receiver does not know when symbols start, where the frame begins, or the exact carrier
+frequency and phase. \Cref{fig:sync-chain} shows the synchronized single-carrier receiver of
+\file{phy/sync.py}, which recovers these quantities in three stages.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=4mm and 5mm]
+  \node[blockbox] (map) {mapper};
+  \node[blockbox,right=of map] (pre) {preamble};
+  \node[blockbox,right=of pre] (ps) {pulse\\shaper};
+  \node[warmbox,right=of ps,minimum width=26mm] (ch) {delay $\tau$, CFO $\Delta f$,\\phase noise, AWGN};
+  \node[blockbox,right=of ch] (mf) {matched\\filter};
+  \node[greenbox,below=9mm of mf] (tr) {timing\\recovery};
+  \node[greenbox,left=of tr] (fs) {frame\\sync};
+  \node[greenbox,left=of fs] (cr) {carrier\\recovery};
+  \node[blockbox,left=of cr] (dm) {demapper};
+  \draw[sig] (map)--(pre); \draw[sig] (pre)--(ps); \draw[sig] (ps)--(ch); \draw[sig] (ch)--(mf);
+  \draw[sig] (mf)--node[right,lbl]{$N_{\mathrm{sps}}\ge2$}(tr); \draw[sig] (tr)--node[above,lbl]{1 sps}(fs);
+  \draw[sig] (fs)--(cr); \draw[sig] (cr)--(dm);
+  \node[note,below=1mm of tr] {fractional $\tau$};
+  \node[note,below=1mm of fs] {integer offset,\\coarse $\Delta f$, phase};
+  \node[note,below=1mm of cr] {residual phase};
+\end{tikzpicture}
+\caption{The synchronized receiver of the \emph{Synchronized QPSK receiver} scenario.}
+\label{fig:sync-chain}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=4 by 1,horizontal sep=4mm,y descriptions at=edge left},
+  constaxis,width=4.1cm,height=4.1cm]
+\nextgroupplot[title={nominal sampling}]
+  \addplot[scatterpts=black!50] table[x=i,y=q]{\datafile{sync_raw}};
+\nextgroupplot[title={after timing rec.}]
+  \addplot[scatterpts=accent] table[x=i,y=q]{\datafile{sync_tr}};
+\nextgroupplot[title={after frame sync}]
+  \addplot[scatterpts=accent4] table[x=i,y=q]{\datafile{sync_fs}};
+\nextgroupplot[title={after the PLL}]
+  \addplot[scatterpts=accent3] table[x=i,y=q]{\datafile{sync_cr}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{QPSK through a delay of 9.37 samples, a 3\,kHz CFO at 1\,MBd, 10\,Hz phase noise and
+12\,dB $E_b/N_0$. Panels: sampled at the nominal instants (ISI and rotation), after Gardner
+timing recovery (rotating ring), after preamble-based CFO and phase correction (residual
+spread), after the decision-directed PLL.}
+\label{fig:sync-const}
+\end{figure}
+
+% ------------------------------------------------------------------
+\section{The preamble}
+\blk{preamble} prepends $L$ known QPSK symbols made of two identical halves of length
+$h=L/2$, the Schmidl--Cox structure~\cite{schmidl1997}, and appends \prm{guard} zero symbols.
+The repetition makes the timing metric insensitive to the CFO and yields a frequency estimate
+(\cref{sec:frame-sync}). The guard gives the receiver slack for unknown delays.
+
+% ------------------------------------------------------------------
+\section{Symbol timing recovery}
+After the matched filter the waveform is sampled at $N_{\mathrm{sps}}$ samples per symbol, but
+the optimum instants $mT+\tau$ fall between samples. Timing recovery has three parts:
+\begin{itemize}
+  \item an \emph{interpolator} that evaluates the waveform at arbitrary instants;
+  \item a \emph{timing error detector} (TED);
+  \item a \emph{loop filter} that turns detector outputs into corrections.
+\end{itemize}
+
+\subsection{Interpolation}
+A cubic Lagrange (Farrow) interpolator evaluates $x(i+\mu)$ for $0\le\mu<1$ from four
+neighbours:
+\begin{equation}
+  x(i+\mu)=c_0+c_1\mu+c_2\mu^2+c_3\mu^3,\quad
+  \begin{aligned}
+  c_0&=x_0, & c_1&=-\tfrac13x_{-1}-\tfrac12x_0+x_1-\tfrac16x_2,\\
+  c_2&=\tfrac12x_{-1}-x_0+\tfrac12x_1, & c_3&=-\tfrac16x_{-1}+\tfrac12x_0-\tfrac12x_1+\tfrac16x_2 .
+  \end{aligned}
+\end{equation}
+\codeexcerpt{cubic}{Farrow-structure cubic interpolation (\code{cubic_interpolate}).}
+
+\subsection{Feedforward start: the Oerder--Meyr estimator}
+A linearly modulated signal is cyclostationary. The mean of $|x(t)|^2$ is periodic in $T$, and
+its first Fourier coefficient has a phase proportional to the timing offset. Over $K$ symbols,
+\begin{equation}
+  \hat\varepsilon=-\frac{1}{2\pi}\arg\sum_{k=0}^{KN_{\mathrm{sps}}-1}|x[k]|^2e^{-j2\pi k/N_{\mathrm{sps}}}
+  \qquad(\text{in symbols, modulo }1),
+\end{equation}
+which needs $N_{\mathrm{sps}}\ge3$~\cite{oerder1988}. The block uses it to initialize the
+loop, which removes the long acquisition (and the risk of hang-up) of a loop started from an
+arbitrary phase.
+\codeexcerpt{om_estimate}{Oerder--Meyr initial estimate.}
+
+\subsection{The Gardner detector}
+Gardner's TED~\cite{gardner1986} uses two samples per symbol, the current strobe and the
+midpoint between strobes:
+\begin{equation}
+  e[m]=\Re\Big\{x\conj\big((m-\tfrac12)T+\hat\tau\big)\,\big[x(mT+\hat\tau)-x((m-1)T+\hat\tau)\big]\Big\}.
+\end{equation}
+It is independent of the carrier phase and works before carrier recovery. Its mean response
+to a timing error, the \emph{S-curve}, is zero at the correct instant and has slope $K_d$
+there (\cref{fig:scurve}). With the convention of the code, $e>0$ means the strobes are late.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=9.5cm,height=5.4cm,xlabel={timing error $\tau/T$},ylabel={$\E\,e$},
+  xmin=-0.5,xmax=0.5,legend pos=north west]
+  \addplot[th=accent] table[x=tau,y=b20]{\datafile{gardner_scurve}};
+  \addplot[th=accent3] table[x=tau,y=b35]{\datafile{gardner_scurve}};
+  \addplot[th=accent2] table[x=tau,y=b60]{\datafile{gardner_scurve}};
+  \legend{$\beta=0.2$,$\beta=0.35$,$\beta=0.6$}
+\end{axis}
+\end{tikzpicture}
+\caption{Measured S-curves of the Gardner detector for QPSK with RRC pulses (8 samples per symbol,
+matched-filtered output of the real blocks, interpolated with the same cubic interpolator). The
+slope at the origin grows with the roll-off; for $\beta=0.35$ it is close to 1, the default
+\prm{detector_gain}.}
+\label{fig:scurve}
+\end{figure}
+
+\subsection{The second-order loop}\label{sec:loop}
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=5mm and 9mm]
+  \node[blockbox] (ted) {detector\\$K_d$};
+  \node[blockbox,right=of ted] (kp) {$K_p$};
+  \node[blockbox,below=of kp] (ki) {$K_i\dfrac{1}{1-z^{-1}}$};
+  \node[sumnode,right=of kp] (s) {$+$};
+  \node[blockbox,right=of s] (nco) {NCO\\$\dfrac{1}{1-z^{-1}}$};
+  \node[blockbox,right=of nco] (int) {interpolator};
+  \draw[sig] (ted) -- node[above,lbl]{$e$} (kp);
+  \draw[sig] (ted.south) |- (ki);
+  \draw[sig] (kp) -- (s); \draw[sig] (ki) -| (s);
+  \draw[sig] (s) -- (nco); \draw[sig] (nco) -- node[above,lbl]{$\hat\tau$} (int);
+  \draw[sig] (int.north) -- ++(0,6mm) -| node[pos=0.25,above,lbl]{strobes} (ted.north);
+\end{tikzpicture}
+\caption{Proportional-plus-integral loop used for timing (and, with a phase detector, for the
+PLL).}
+\end{figure}
+A proportional-plus-integral loop filter makes the loop second order. It tracks a constant
+offset with zero error and a frequency (clock drift) with zero steady-state error. The gains
+follow from the normalized noise bandwidth $B_nT$ and the damping $\zeta$~\cite{mengali1997}:
+\begin{equation}
+  \theta=\frac{B_nT}{\zeta+\frac{1}{4\zeta}},\qquad
+  K_p=\frac{4\zeta\theta}{(1+2\zeta\theta+\theta^2)K_d},\qquad
+  K_i=\frac{4\theta^2}{(1+2\zeta\theta+\theta^2)K_d} .
+\end{equation}
+\codeexcerpt{loop_gains}{Second-order loop gains.}
+\codeexcerpt{gardner_loop}{The timing loop: interpolate, detect, filter, advance.}
+A small $B_nT$ averages noise better but tracks more slowly; $0.01$ (the default) is a common
+compromise.
+
+% ------------------------------------------------------------------
+\section{Frame synchronization and coarse CFO}\label{sec:frame-sync}
+At symbol rate, with a residual CFO of $\epsilon$ cycles per symbol, the two halves of the
+preamble differ only by the phase $2\pi\epsilon h$. The Schmidl--Cox metric is evaluated at
+every candidate start $d$:
+\begin{equation}
+  P(d)=\sum_{k=0}^{h-1}r\conj[d+k]\,r[d+k+h],\qquad
+  M(d)=\frac{|P(d)|^2}{\big(\sum_k|r[d+k+h]|^2\big)^2},\qquad
+  \hat\epsilon=\frac{\arg P(\hat d)}{2\pi h}.
+\end{equation}
+The estimate is unambiguous for $|\epsilon|<1/(2h)$. Because $M(d)$ has a plateau, its maximum is
+used only for the CFO estimate. After derotation, the frame start is located by
+cross-correlation with the known preamble,
+$\hat d=\argmax_d\big|\sum_kr[d+k]\,p\conj[k]\big|$. The CFO is then refined at the exact
+position, and the common phase is taken from the correlation peak. Finally the payload symbols
+are extracted.
+\codeexcerpt{frame_sync}{Schmidl--Cox CFO, correlation timing and refinement (\blk{frame_sync}).}
+
+% ------------------------------------------------------------------
+\section{Carrier phase tracking}
+The residual phase (CFO residue and phase noise) is tracked by a decision-directed PLL. For
+$y=s\,e^{j\Delta\phi}+w$ and a correct decision $\hat s$,
+\begin{equation}
+  e=\frac{\Im\{y\,\hat s\conj\}}{|\hat s|^2}=\sin\Delta\phi+\text{noise}\approx\Delta\phi ,
+\end{equation}
+so the detector gain is 1. The same second-order loop as above updates the phase estimate
+every symbol. Like every decision-directed scheme it has an $M$-fold phase ambiguity, which the
+preamble phase estimate resolves beforehand.
+\codeexcerpt{dd_pll}{Decision-directed PLL (\blk{carrier_recovery}).}
+
+\begin{pitfall}
+The PLL bandwidth must exceed the phase-noise linewidth relative to the symbol rate. It must
+also be small enough that decision errors at low SNR do not make it slip cycles. A cycle slip
+rotates all subsequent decisions by $2\pi/M$ and appears as a burst of errors until the next
+preamble. Differential encoding or pilot symbols are the classic remedies.
+\end{pitfall}

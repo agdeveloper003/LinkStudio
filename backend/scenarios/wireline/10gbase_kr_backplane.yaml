@@ -1,0 +1,28 @@
+name: 10GBASE-KR backplane
+category: Wireline
+description: 64B/66B-coded NRZ at 10.3125 GBd over 1 m of PCB backplane. CTLE plus an adaptive
+  FFE/DFE open the eye. Watch the sync-header errors (bdec.invalid_words).
+seed: 1
+batch_size: 4
+blocks:
+  src: {type: random_bits, params: {n_bits: 6400}}
+  enc: {type: line_block_encoder, params: {code: 64b66b}}
+  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 10312500000.0}}
+  tx: {type: pulse_shaper, params: {shape: rc, sps: 8, rolloff: 0.5, span: 8}}
+  ch: {type: copper_line, params: {preset: backplane, length_m: 1.0}}
+  awgn: {type: awgn, params: {mode: snr, snr_db: 26.0}}
+  ctle: {type: ctle, params: {zero_hz: 1000000000.0, pole1_hz: 5000000000.0, pole2_hz: 20000000000.0}}
+  rx: {type: matched_filter, params: {shape: none}}
+  agc: {type: agc, params: {remove_dc: false}}
+  dfe: {type: dfe_equalizer}
+  dec: {type: line_decoder, params: {code: nrz}}
+  bdec: {type: line_block_decoder, params: {code: 64b66b}}
+  ber: {type: ber_meter, params: {skip_bits: 400}}
+chain: [src, enc, lc, tx, ch, awgn, ctle, rx, agc, dfe, dec, bdec, ber.rx]
+edges:
+  - lc.out -> dfe.ref
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: eye}
+  - {key: ctle.out, view: eye}
+  - {key: dfe.out, view: time}

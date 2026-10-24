@@ -1,0 +1,34 @@
+# Single-carrier 16-QAM waveform through a realistic front-end:
+# RRC shaping -> PA (Rapp) -> IQ imbalance -> phase noise -> AWGN -> matched filter.
+#   python -m linkstudio run scenarios/rrc_16qam_impairments.yaml
+category: Examples (CLI)
+name: rrc-16qam-impairments
+seed: 2
+batch_size: 16
+
+blocks:
+  src:   {type: random_bits, params: {n_bits: 4000}}
+  map:   {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 1.0e6}}
+  tx:    {type: pulse_shaper, params: {shape: rrc, sps: 4, span: 10, rolloff: 0.25}}
+  pa:    {type: power_amplifier, params: {model: rapp, input_backoff_db: 8.0, smoothness: 3.0}}
+  iq:    {type: iq_imbalance, params: {amplitude_db: 0.3, phase_deg: 2.0}}
+  # No carrier tracking yet: the Wiener phase drifts freely over the 1 ms frame
+  # (std = sqrt(2*pi*linewidth*T)), so keep the linewidth small.
+  pn:    {type: phase_noise, params: {linewidth_hz: 2.0}}
+  awgn:  {type: awgn, params: {mode: esn0, snr_db: 22.0}}
+  mf:    {type: matched_filter}
+  demap: {type: demapper, params: {method: hard}}
+  ber:   {type: ber_meter}
+  evm:   {type: evm_meter}
+  pwr:   {type: power_meter}
+
+chain: [src, map, tx, pa, iq, pn, awgn, mf, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - mf.out -> evm.in
+  - tx.out -> pwr.in
+
+simulation:
+  n_batches: 5
+capture: [mf.out]

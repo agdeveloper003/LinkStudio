@@ -1,0 +1,17 @@
+name: Hamming code, hard decisions
+category: Coding
+description: Systematic Hamming(7,4) single-error-correcting code with syndrome decoding on BPSK.
+  Change enc.m and dec.m together (3 to 6) to trade rate for protection.
+seed: 1
+batch_size: 32
+blocks:
+  src: {type: random_bits, params: {n_bits: 1000}}
+  enc: {type: hamming_encoder, params: {m: 3}}
+  map: {type: mapper, params: {scheme: psk, order: 2}}
+  awgn: {type: awgn, params: {mode: ebn0, snr_db: 7.0}}
+  demap: {type: demapper, params: {method: hard}}
+  dec: {type: hamming_decoder, params: {m: 3}}
+  ber: {type: ber_meter}
+chain: [src, enc, map, awgn, demap, dec, ber.rx]
+edges:
+  - src.out -> ber.tx

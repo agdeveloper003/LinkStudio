@@ -1,0 +1,86 @@
+\chapter{Validation}\label{ch:validation}
+
+A simulator is only useful if its numbers can be trusted. LinkStudio is validated at three levels:
+\begin{itemize}
+  \item unit tests of the engine and the DSP helpers;
+  \item \emph{physics tests}, which compare complete chains with closed-form results;
+  \item a test that loads and runs every shipped scenario.
+\end{itemize}
+The demo scripts repeat the physics checks in readable form, and this manual's figures are a
+third, visual check of the same models.
+
+\section{Running the checks}
+\begin{lstlisting}[style=shell]
+cd backend
+python -m pytest                 # all tests (about 170, a few minutes)
+python -m pytest tests/test_physics.py -q
+python scripts/main.py           # demos: simulated vs theory, PASS/FAIL per check
+python scripts/main.py --quick   # fewer errors per point, faster
+\end{lstlisting}
+Physics tests stop after 300--500 errors and accept a relative deviation of 20--25\,\%. By
+\cref{sec:mc} this is several standard deviations, so false alarms are negligible, while a
+systematic error of 1\,dB (a factor of 2--3 in BER on steep curves) is caught.
+
+\section{Physics checks}
+\begin{center}
+\small
+\begin{longtable}{@{}p{3.3cm}p{5.6cm}p{5.3cm}@{}}
+\toprule
+\textbf{Model} & \textbf{Reference} & \textbf{Checked in}\\
+\midrule
+\endhead
+AWGN, PSK/QAM/PAM & exact Gray BER (\cref{sec:ber-awgn}) & \file{test_physics.py}, \cref{fig:ber-awgn}\\
+Soft demapping & max-log decisions = hard decisions & \file{test_physics.py}\\
+Pulse shaping & RRC link BER = symbol-rate theory; noise metadata after MF & \file{test_physics.py}\\
+OFDM over AWGN & per-subcarrier $E_s/N_0$ theory & \file{test_physics.py}\\
+OFDM multipath & LS and perfect CSI equalization & \file{test_physics.py}, \cref{fig:ofdm-chest}\\
+Rayleigh + ZF & \cref{eq:rayleigh-ber} & \file{test_physics.py}, \cref{fig:diversity}\\
+ISI equalizers & ZF/MMSE/LMS remove ISI & \file{test_physics.py}\\
+Soft vs hard Viterbi & soft better by $\approx2$\,dB & \file{test_physics.py}\\
+Synchronization & receiver close to theory with delay and CFO; fails without sync & \file{test_advanced.py}\\
+Carrier recovery & tracks phase noise & \file{test_advanced.py}\\
+Timing recovery & estimates the fractional delay & \file{test_advanced.py}\\
+LDPC & codewords satisfy $\mat H\vect c\T=0$; corrects noise; coding gain & \file{test_advanced.py}\\
+Polar & noiseless decoding; frozen set; coding gain & \file{test_advanced.py}\\
+Puncturing & rate 3/4; decodable & \file{test_advanced.py}\\
+SIMO MRC & \cref{eq:mrc}, $L=2$ & \file{test_advanced.py}, \cref{fig:diversity}\\
+Spatial multiplexing & ZF $2\times2$ = SISO Rayleigh; ML $<$ MMSE $<$ ZF & \file{test_advanced.py}, \cref{fig:smux}\\
+Alamouti & MRC $L=2$ shifted by 3\,dB & \file{test_advanced.py}, \cref{fig:diversity}\\
+Time-varying multipath & OFDM with Jakes taps & \file{test_advanced.py}\\
+Line codes & round trips; 4B/5B and 64B/66B rates; error multiplication & \file{test_wireline_optical.py}\\
+Real NRZ over AWGN & BPSK theory & \file{test_wireline_optical.py}\\
+Cable & insertion loss equals the preset formula & \file{test_wireline_optical.py}, \cref{fig:cable}\\
+SerDes & CTLE peaking; CTLE + DFE open the eye & \file{test_wireline_optical.py}, \cref{fig:ctle}\\
+DMT & water-filling bit loading & \file{test_wireline_optical.py}, \cref{fig:dmt}\\
+Crosstalk, echo & coupling level; canceller reduces echo & \file{test_wireline_optical.py}\\
+Jitter & zero jitter is identity; RJ degrades & \file{test_wireline_optical.py}\\
+Fiber loss, metadata & $P\,e^{-\alpha L}$, $D\ell$ & \file{test_wireline_optical.py}\\
+Dispersion & Gaussian broadening; exact compensation & \file{test_wireline_optical.py}, \cref{fig:dispersion}\\
+SPM & CW phase $\gamma PL_{\mathrm{eff}}$ & \file{test_wireline_optical.py}, \cref{fig:spm}\\
+Split-step solver & second-order convergence on the soliton & \cref{fig:soliton}\\
+EDFA & OSNR formula & \file{test_wireline_optical.py}, \cref{fig:osnr}\\
+IM/DD OOK & Q-factor BER & \file{test_wireline_optical.py}, \cref{fig:ook}\\
+IM/DD PAM-4 & dispersion-induced power fading & \file{test_wireline_optical.py}\\
+Coherent DP-QPSK & BER vs OSNR theory within $\approx0.3$\,dB; FO estimate & \file{test_wireline_optical.py}\\
+FSO & mean and variance of the scintillation & \file{test_wireline_optical.py}, \cref{fig:fso}\\
+WDM & XPM lowers the MER of the centre channel & \file{test_wireline_optical.py}\\
+CP-based OFDM sync & recovers delay and CFO & \file{test_wireline_optical.py}\\
+Confidence interval & Wilson bounds contain the BER & \file{test_wireline_optical.py}\\
+All scenarios & load, validate, run; BER below a threshold & \file{test_scenarios.py}\\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\section{Known limitations}
+Every model in this manual states its assumptions; the most important simplifications are
+collected here.
+\begin{itemize}
+  \item Lasers are behavioural (no rate equations); PMD is first order with the mean DGD.
+  \item WDM simulates the full multi-channel field but demodulates only one channel.
+  \item The OFDM CP synchronizer estimates the fractional CFO only.
+  \item DMT adapts bits to a flat transmit PSD (no power water-filling).
+  \item MIMO channels are flat; frequency-selective MIMO-OFDM is not yet a block.
+  \item Subsystems are edited in their YAML files, not in the GUI.
+  \item Error counts assume independent errors; for coded and block-fading links, also judge
+  the accuracy by the number of frame errors.
+\end{itemize}

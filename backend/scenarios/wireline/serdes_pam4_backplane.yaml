@@ -1,0 +1,28 @@
+name: SerDes 25 GBd PAM-4 backplane
+category: Wireline
+description: 50 Gb/s PAM-4 over a 0.8 m PCB backplane trace. The CTLE boosts high frequencies and
+  the adaptive FFE/DFE removes the remaining ISI. Try removing the CTLE peaking or adding jitter.
+seed: 1
+batch_size: 8
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: pam, order: 4, symbol_rate: 25000000000.0}}
+  tx: {type: pulse_shaper, params: {shape: rc, sps: 8, rolloff: 0.5, span: 8}}
+  ch: {type: copper_line, params: {preset: backplane, length_m: 0.8}}
+  jit: {type: jitter, params: {rj_rms_ui: 0.01}}
+  awgn: {type: awgn, params: {mode: snr, snr_db: 30.0}}
+  ctle: {type: ctle, params: {zero_hz: 2000000000.0, pole1_hz: 12000000000.0, pole2_hz: 40000000000.0}}
+  rx: {type: matched_filter, params: {shape: none}}
+  agc: {type: agc, params: {remove_dc: false}}
+  dfe: {type: dfe_equalizer}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter, params: {skip_bits: 800}}
+chain: [src, map, tx, ch, jit, awgn, ctle, rx, agc, dfe, demap, ber.rx]
+edges:
+  - map.out -> dfe.ref
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: eye}
+  - {key: ctle.out, view: eye}
+  - {key: agc.out, view: time}
+  - {key: dfe.out, view: time}

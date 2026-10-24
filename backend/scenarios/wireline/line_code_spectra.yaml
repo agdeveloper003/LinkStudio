@@ -1,0 +1,26 @@
+name: Line code spectra
+category: Wireline
+description: The same bits encoded with NRZ, Manchester, AMI and MLT-3 at 100 Mb/s. Compare the
+  four spectra in Live mode - DC content, bandwidth and spectral nulls.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  nrz: {type: line_encoder, params: {code: nrz, symbol_rate: 100000000.0}}
+  nrz_tx: {type: pulse_shaper, params: {shape: rect, sps: 8}}
+  man: {type: line_encoder, params: {code: manchester, symbol_rate: 200000000.0}}
+  man_tx: {type: pulse_shaper, params: {shape: rect, sps: 4}}
+  ami: {type: line_encoder, params: {code: ami, symbol_rate: 100000000.0}}
+  ami_tx: {type: pulse_shaper, params: {shape: rect, sps: 8}}
+  mlt: {type: line_encoder, params: {code: mlt3, symbol_rate: 100000000.0}}
+  mlt_tx: {type: pulse_shaper, params: {shape: rect, sps: 8}}
+chain:
+  - [src, nrz, nrz_tx]
+  - [src, man, man_tx]
+  - [src, ami, ami_tx]
+  - [src, mlt, mlt_tx]
+probes:
+  - {key: nrz_tx.out, view: spectrum}
+  - {key: man_tx.out, view: spectrum}
+  - {key: ami_tx.out, view: spectrum}
+  - {key: mlt_tx.out, view: spectrum}

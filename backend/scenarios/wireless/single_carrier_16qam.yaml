@@ -1,0 +1,47 @@
+name: RRC 16-QAM link
+category: Wireless
+description: Single-carrier 16-QAM with RRC shaping, front-end impairments (neutral by default) and AWGN.
+  Start Live mode and move snr_db, rolloff or the impairments.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 1000000.0}}
+  tx: {type: pulse_shaper, params: {shape: rrc, sps: 4, span: 10, rolloff: 0.25}}
+  pa: {type: power_amplifier, params: {model: rapp, input_backoff_db: 12.0}}
+  cfo: {type: carrier_offset, params: {cfo_hz: 0.0, phase_deg: 0.0}}
+  iq: {type: iq_imbalance}
+  awgn: {type: awgn, params: {mode: esn0, snr_db: 20.0}}
+  mf: {type: matched_filter}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter, params: {bits_per_symbol: 4}}
+  evm: {type: evm_meter}
+edges:
+  - src.out -> map.in
+  - map.out -> tx.in
+  - tx.out -> pa.in
+  - pa.out -> cfo.in
+  - cfo.out -> iq.in
+  - iq.out -> awgn.in
+  - awgn.out -> mf.in
+  - mf.out -> demap.in
+  - demap.out -> ber.rx
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - mf.out -> evm.in
+probes:
+  - {key: tx.out, view: spectrum}
+  - {key: mf.out, view: constellation}
+  - {key: awgn.out, view: eye}
+layout:
+  src: [0, 120]
+  map: [220, 120]
+  tx: [440, 120]
+  pa: [660, 120]
+  cfo: [880, 120]
+  iq: [1100, 120]
+  awgn: [1100, 330]
+  mf: [880, 330]
+  demap: [660, 330]
+  ber: [440, 360]
+  evm: [660, 500]

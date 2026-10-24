@@ -1,0 +1,65 @@
+import type { ProbeResult } from "../../api";
+import { kindColor } from "../../theme";
+import { Constellation } from "./Constellation";
+import { EyePlot } from "./EyePlot";
+import { Heatmap } from "./Heatmap";
+import { LinePlot } from "./LinePlot";
+
+interface Props {
+  name: string;
+  data?: ProbeResult;
+  onView?: (view: string) => void;
+  onClose?: () => void;
+}
+
+/** One scope card: title, view selector and the right plot for the data type. */
+export function ProbeView({ name, data, onView, onClose }: Props) {
+  const color = kindColor(data?.kind);
+  return (
+    <div className="scope-card">
+      <div className="scope-header">
+        <span className="scope-title" style={{ color }}>{name}</span>
+        {data?.views && data.views.length > 1 && onView && (
+          <select value={data.view} onChange={(e) => onView(e.target.value)}>
+            {data.views.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+        )}
+        {onClose && (
+          <button className="icon-btn" title="Remove probe" onClick={onClose}>×</button>
+        )}
+      </div>
+      <div className="scope-body">{render(data, color)}</div>
+    </div>
+  );
+}
+
+function render(data: ProbeResult | undefined, color: string) {
+  if (!data) return <div className="scope-empty">Waiting for data…</div>;
+  switch (data.type) {
+    case "scatter":
+      return <Constellation i={data.i} q={data.q} refI={data.ref_i} refQ={data.ref_q} color={color} />;
+    case "line":
+      return (
+        <LinePlot
+          x={data.x}
+          xlabel={data.xlabel}
+          ylabel={data.ylabel}
+          bars={data.bars}
+          series={Object.entries(data.series).map(([label, values], k) => ({
+            label,
+            data: values,
+            color: k === 0 ? color : undefined,
+            width: 1.3,
+          }))}
+        />
+      );
+    case "eye":
+      return <EyePlot t={data.t} traces={data.traces} />;
+    case "heatmap":
+      return <Heatmap z={data.z} />;
+    default:
+      return <div className="scope-empty">{data.type === "message" ? data.text : "Unsupported plot"}</div>;
+  }
+}

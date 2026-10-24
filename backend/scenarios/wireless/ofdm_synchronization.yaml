@@ -1,0 +1,30 @@
+name: OFDM timing and CFO synchronization
+category: Wireless
+description: An unknown delay and a carrier frequency offset destroy OFDM orthogonality.
+  The blind cyclic-prefix correlator finds the symbol start and the fractional CFO. Remove the
+  sync block to see the receiver fail.
+seed: 1
+batch_size: 8
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: qam, order: 16}}
+  ofdm: {type: ofdm_modulator, params: {n_fft: 64, cp_len: 16, n_active: 52, pilot_spacing: 4, subcarrier_spacing: 312500.0, tail_zeros: 80}}
+  tim: {type: timing_offset, params: {delay_samples: 37.0}}
+  cfo: {type: carrier_offset, params: {cfo_hz: 60000.0, random_phase: true}}
+  awgn: {type: awgn, params: {mode: esn0, snr_db: 22.0}}
+  sync: {type: ofdm_sync}
+  demod: {type: ofdm_demodulator}
+  est: {type: ofdm_channel_estimator}
+  eq: {type: ofdm_equalizer}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+chain: [src, map, ofdm, tim, cfo, awgn, sync, demod, est]
+edges:
+  - demod.out -> eq.in
+  - est.out -> eq.csi
+  - eq.out -> demap.in
+  - demap.out -> ber.rx
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: spectrum}
+  - {key: eq.out, view: constellation}

@@ -1,0 +1,70 @@
+% =====================================================================
+%  LinkStudio - Theory and User Manual
+%  Build:  latexmk -pdf linkstudio-manual.tex      (see README.md)
+%  Data, code excerpts and reference tables come from tools/generate.py.
+% =====================================================================
+\documentclass[11pt,a4paper,twoside,openany]{book}
+\input{preamble.tex}
+
+\begin{document}
+\frontmatter
+\begin{titlepage}
+  \centering
+  \vspace*{30mm}
+  {\sffamily\color{accent}\fontsize{40}{44}\selectfont\bfseries LinkStudio\par}
+  \vspace{6mm}
+  {\sffamily\Large\color{ink} A modular physical-layer communication simulator\par}
+  \vspace{4mm}
+  {\color{accent}\rule{0.6\textwidth}{0.8pt}\par}
+  \vspace{6mm}
+  {\sffamily\LARGE Theory and User Manual\par}
+  \vspace{22mm}
+  \begin{tikzpicture}[scale=0.9,transform shape]
+    \node[blockbox,fill=kbits!12,draw=kbits] (a) {bits};
+    \node[blockbox,right=6mm of a,fill=ksym!12,draw=ksym] (b) {symbols};
+    \node[blockbox,right=6mm of b,fill=ksamp!12,draw=ksamp] (c) {waveform};
+    \node[warmbox,right=6mm of c] (d) {channel};
+    \node[blockbox,right=6mm of d,fill=ksamp!12,draw=ksamp] (e) {receiver};
+    \node[blockbox,right=6mm of e,fill=kllr!12,draw=kllr] (f) {LLRs};
+    \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f} \draw[sig] (\x)--(\y);
+  \end{tikzpicture}
+  \vfill
+  {\sffamily\small Wireless \textperiodcentered{} Wireline \textperiodcentered{} Optical \textperiodcentered{} Coding \textperiodcentered{} Synchronization \textperiodcentered{} MIMO\par}
+  \vspace{4mm}
+  {\sffamily\small Engine v0.4 \textperiodcentered{} \today\par}
+\end{titlepage}
+
+\cleardoublepage
+\tableofcontents
+\input{chapters/00-preface}
+
+\mainmatter
+\part{Using and extending LinkStudio}
+\input{chapters/01-overview}
+\input{chapters/02-engine}
+\input{chapters/03-interfaces}
+\input{chapters/04-extending}
+
+\part{Theory and implementation}
+\input{chapters/05-baseband}
+\input{chapters/06-modulation}
+\input{chapters/07-pulse-shaping}
+\input{chapters/08-impairments}
+\input{chapters/09-fading-equalization}
+\input{chapters/10-synchronization}
+\input{chapters/11-ofdm}
+\input{chapters/12-mimo}
+\input{chapters/13-coding}
+\input{chapters/14-wireline}
+\input{chapters/15-optical}
+\input{chapters/16-validation}
+
+\appendix
+\part{Reference}
+\input{chapters/A-blocks}
+\input{chapters/B-metadata}
+\input{chapters/C-scenarios}
+
+\backmatter
+\input{chapters/Z-bibliography}
+\end{document}

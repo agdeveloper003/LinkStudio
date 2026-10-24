@@ -1,0 +1,33 @@
+name: Fast Ethernet 100BASE-TX
+category: Wireline
+description: 4B/5B block coding and MLT-3 at 125 MBd over 100 m of Cat 5e, with the local
+  transmitter leaking through the hybrid (full duplex). An NLMS echo canceller and an MMSE
+  equalizer recover the far-end signal.
+seed: 1
+batch_size: 4
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  enc: {type: line_block_encoder, params: {code: 4b5b}}
+  lc: {type: line_encoder, params: {code: mlt3, symbol_rate: 125000000.0}}
+  ch: {type: copper_line, params: {preset: cat5e, length_m: 100.0}}
+  awgn: {type: awgn, params: {mode: snr, snr_db: 30.0}}
+  local_src: {type: random_bits, params: {n_bits: 4000}}
+  local_enc: {type: line_block_encoder, params: {code: 4b5b}}
+  local_lc: {type: line_encoder, params: {code: mlt3, symbol_rate: 125000000.0}}
+  echo: {type: hybrid_echo, params: {echo_db: -6.0}}
+  ec: {type: echo_canceller, params: {n_taps: 8}}
+  eq: {type: linear_equalizer, params: {n_taps: 21}}
+  dec: {type: line_decoder, params: {code: mlt3}}
+  bdec: {type: line_block_decoder, params: {code: 4b5b}}
+  ber: {type: ber_meter, params: {skip_bits: 1000}}
+chain:
+  - [src, enc, lc, ch, awgn, echo, ec, eq, dec, bdec, ber.rx]
+  - [local_src, local_enc, local_lc, echo.tx]
+edges:
+  - local_lc.out -> ec.tx
+  - ch.csi -> eq.csi
+  - src.out -> ber.tx
+probes:
+  - {key: lc.out, view: time}
+  - {key: echo.out, view: time}
+  - {key: eq.out, view: time}
