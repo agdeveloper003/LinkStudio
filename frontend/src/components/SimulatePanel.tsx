@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type { EditorGraph, Probe } from "../api";
 import { useJob } from "../useJob";
-import { DEFAULT_STOP, MetricsTable, ProgressBar, ScopeGrid, StopRuleEditor, fmt, stopConfig, type StopRule } from "./common";
+import {
+  DEFAULT_STOP, MetricsTable, ProgressBar, ResourceFields, ScopeGrid, StopRuleEditor, fmt, stopConfig, type Resources, type StopRule,
+} from "./common";
 
 interface Props {
   getGraph: () => EditorGraph;
@@ -9,9 +11,10 @@ interface Props {
   onView: (key: string, view: string) => void;
   onRemoveProbe: (key: string) => void;
   blocked?: string;
+  resources: Resources;
 }
 
-export function SimulatePanel({ getGraph, probes, onView, onRemoveProbe, blocked }: Props) {
+export function SimulatePanel({ getGraph, probes, onView, onRemoveProbe, blocked, resources }: Props) {
   const [rule, setRule] = useState<StopRule>({ ...DEFAULT_STOP, n_batches: 20 });
   const { job, error, busy, run, cancel } = useJob();
   const result = job?.result;
@@ -22,10 +25,11 @@ export function SimulatePanel({ getGraph, probes, onView, onRemoveProbe, blocked
         {busy ? (
           <button className="danger" onClick={cancel}>■ Cancel</button>
         ) : (
-          <button className="primary" disabled={!!blocked} title={blocked} onClick={() => run("simulation", getGraph(), stopConfig(rule))}>▶ Run simulation</button>
+          <button className="primary" disabled={!!blocked} title={blocked} onClick={() => run("simulation", getGraph(), { ...stopConfig(rule), workers: resources.workers })}>▶ Run simulation</button>
         )}
         {blocked && <span className="field-error blocked">{blocked}</span>}
         <StopRuleEditor rule={rule} onChange={setRule} />
+        <ResourceFields res={resources} />
         {job && <ProgressBar value={job.progress} status={job.status} />}
         {job && (
           <span className="muted small">

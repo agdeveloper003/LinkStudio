@@ -35,8 +35,8 @@ export function LivePanel({ live, probes, onStart, onView, onRemoveProbe, blocke
         <button onClick={live.resetMetrics} disabled={!live.running}>Reset metrics</button>
         <span className="muted small">
           {live.running
-            ? `batch ${live.frame?.batch ?? 0} · ${live.frame?.step_ms ?? "–"} ms/batch`
-            : "Parameters changed in the inspector are applied while running."}
+            ? `frame ${live.frame?.batch ?? 0} · ${live.frame?.step_ms ?? "–"} ms/frame`
+            : "One frame per step. Parameters changed in the inspector are applied while running."}
         </span>
         {live.error && <span className="field-error">{live.error}</span>}
       </div>

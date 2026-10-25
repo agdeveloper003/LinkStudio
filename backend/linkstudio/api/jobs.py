@@ -16,6 +16,7 @@ import numpy as np
 from linkstudio.api.editor import build_graph
 from linkstudio.api.probes import compute_probes
 from linkstudio.core import Simulation, StopCriteria, Sweep
+from linkstudio.core.parallel import cpu_count
 from linkstudio.phy import theory
 
 
@@ -112,6 +113,10 @@ class JobManager:
                                       max_time_s=cfg.get("max_time_s"))
         return int(cfg.get("n_batches", 10)), None
 
+    @staticmethod
+    def _workers(cfg: dict[str, Any]) -> int:
+        return max(1, min(int(cfg.get("workers", 1)), cpu_count()))
+
     def _run_simulation(self, job: Job, graph, editor: dict[str, Any], cfg: dict[str, Any]) -> None:
         n_batches, stop = self._stop(cfg)
         total = n_batches or (stop.max_batches if stop else 1)
@@ -124,7 +129,9 @@ class JobManager:
             job.result = {"metrics": metrics, "n_batches": n}
             return not job.cancel_event.is_set()
 
-        res = sim.run(n_batches=n_batches, stop=stop, capture="*", on_batch=on_batch)
+        keys = [p["key"] for p in probes]
+        res = sim.run(n_batches=n_batches, stop=stop, capture="*" if self._workers(cfg) == 1 else keys,
+                      on_batch=on_batch, workers=self._workers(cfg))
         job.result = {"metrics": res.metrics, "n_batches": res.n_batches, "elapsed_s": res.elapsed_s,
                       "stop_reason": res.stop_reason, "probes": compute_probes(res.captures, probes)}
 
@@ -143,7 +150,7 @@ class JobManager:
             job.message = f"point {i + 1}/{n}"
 
         job.message = f"0/{total} points"
-        sweep.run(on_point=on_point, should_stop=job.cancel_event.is_set)
+        sweep.run(on_point=on_point, should_stop=job.cancel_event.is_set, workers=self._workers(cfg))
         result: dict[str, Any] = {"param_names": list(params)}
         key = cfg.get("theory")
         if key in THEORY_CURVES and len(params) == 1:

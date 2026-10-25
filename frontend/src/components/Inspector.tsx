@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { Catalogue, Probe, Validation } from "../api";
+import type { Catalogue, EditorGraph, Probe, Validation } from "../api";
 import type { BlockNodeType } from "../graph";
 import { CATEGORY_COLORS, kindColor } from "../theme";
+import { FrequencyResponse } from "./FrequencyResponse";
 import { ParamField } from "./ParamField";
 
 interface Props {
@@ -16,6 +17,9 @@ interface Props {
   onDelete: (node: string) => void;
   onDuplicate: (node: string) => void;
   onScenarioChange: (patch: { name?: string; description?: string; category?: string }) => void;
+  getGraph: () => EditorGraph;
+  /** Key of the graph structure and parameters (refreshes the frequency response). */
+  structureKey: string;
 }
 
 export function Inspector(props: Props) {
@@ -58,6 +62,8 @@ export function Inspector(props: Props) {
           ))}
         </div>
       )}
+
+      <FrequencyResponse block={node.id} getGraph={props.getGraph} refreshKey={props.structureKey} />
 
       {node.data.outputs.length > 0 && (
         <div className="section">
@@ -153,7 +159,9 @@ function ScenarioInfo({ scenario, validation, onScenarioChange }: Props) {
         <div className="section-title">How to</div>
         <ul>
           <li>Drag blocks from the library onto the canvas.</li>
-          <li>Connect an output (right) to an input (left); colors show the signal kind.</li>
+          <li>Connect an output to an input; colors show the signal kind.</li>
+          <li>Ctrl + drag a port to move it around the block border.</li>
+          <li>Blocks snap so that connected ports line up; links route around blocks.</li>
           <li>Select a block to edit its parameters and add probes on its outputs.</li>
           <li><b>Live</b> streams scopes and reacts to parameter changes instantly.</li>
           <li><b>Simulate</b> runs a Monte-Carlo job; <b>Sweep</b> draws curves vs a parameter.</li>

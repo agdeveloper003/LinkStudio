@@ -101,27 +101,28 @@ textarea { width: 100%; resize: vertical; }
 .react-flow__edge.selected .react-flow__edge-path { filter: drop-shadow(0 0 3px rgba(110,168,254,0.8)); }
 
 .block-node {
-  min-width: 170px; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius);
+  position: relative; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius);
   box-shadow: 0 4px 14px rgba(0,0,0,0.35); font-size: 12px;
 }
 .block-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(0,0,0,0.45); }
 .block-node.error { border-color: var(--danger); }
 .block-node-header {
-  display: flex; flex-direction: column; padding: 6px 10px 5px; border-top: 3px solid; border-radius: var(--radius) var(--radius) 0 0;
-  background: var(--panel-2);
+  display: flex; flex-direction: column; height: 34px; padding: 3px 10px 0; border-top: 3px solid;
+  border-radius: var(--radius) var(--radius) 0 0; background: var(--panel-2); overflow: hidden;
 }
-.block-node-name { font-weight: 700; font-size: 13px; }
-.block-node-type { font-family: "JetBrains Mono", Consolas, monospace; font-size: 10.5px; }
-.block-node-summary { padding: 3px 10px; color: var(--muted); font-size: 10.5px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
-.block-node-ports { padding: 5px 0; }
-.port-row { display: flex; justify-content: space-between; gap: 14px; min-height: 20px; }
-.port { position: relative; display: flex; align-items: center; padding: 0 12px; color: #b6bdcc; font-size: 11px; }
-.port-out { justify-content: flex-end; margin-left: auto; }
-.port .optional { font-style: italic; color: var(--muted); }
-.handle { width: 10px !important; height: 10px !important; border: 2px solid var(--panel) !important; }
-.port-in .handle { left: -5px !important; }
-.port-out .handle { right: -5px !important; }
+.block-node-name { font-weight: 700; font-size: 13px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.block-node-type { font-family: "JetBrains Mono", Consolas, monospace; font-size: 10.5px; line-height: 13px; }
+.block-node-summary { height: 18px; line-height: 17px; padding: 0 10px; color: var(--muted); font-size: 10.5px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.handle { width: 10px !important; height: 10px !important; min-width: 0; border: 2px solid var(--panel) !important; transform: translate(-50%, -50%) !important; }
+.port-label { position: absolute; color: #b6bdcc; font-size: 11px; white-space: nowrap; pointer-events: none; line-height: 14px; }
+.port-label.optional { font-style: italic; color: var(--muted); }
+.port-label.side-left { transform: translate(10px, -50%); }
+.port-label.side-right { transform: translate(calc(-100% - 10px), -50%); }
+.port-label.side-top { transform: translate(-50%, 6px); background: var(--panel-2); padding: 0 3px; border-radius: 3px; }
+.port-label.side-bottom { transform: translate(-50%, calc(-100% - 6px)); }
 .probe-dot { color: #fbbf24; margin-right: 4px; font-size: 9px; }
+body.moving-port, body.moving-port * { cursor: grabbing !important; }
+.align-guide { position: absolute; background: #fbbf24; opacity: 0.85; pointer-events: none; z-index: 1000; }
 
 /* --------------------------------------------------------------- inspector */
 .inspector { background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; padding-bottom: 20px; min-width: 0; }
@@ -257,3 +258,6 @@ table.shortcuts td:first-child { font-family: "JetBrains Mono", Consolas, monosp
 .card-desc { color: #b2b9c8; font-size: 12px; line-height: 1.45; flex: 1; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .card-meta { color: var(--muted); font-size: 11px; font-family: "JetBrains Mono", Consolas, monospace; }
 .field-error.blocked { margin: 0; max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.response-title { display: flex; align-items: center; gap: 6px; }
+.response-title select { margin-left: auto; font-size: 11px; padding: 1px 4px; text-transform: none; letter-spacing: 0; }
+.response-plot { height: 190px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px; }

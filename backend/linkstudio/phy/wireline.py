@@ -185,24 +185,114 @@ class LineBlockDecoder(Block):
 
 
 # --------------------------------------------------------------------- cables
-# Insertion loss in dB/km: a * sqrt(f_MHz) + b * f_MHz (approximate, for teaching).
+# Insertion loss in dB/km: a * sqrt(f_MHz) + b * f_MHz (+ c / sqrt(f_MHz) for the TIA categories).
 CABLE_PRESETS: dict[str, tuple[float, float]] = {
-    "cat5e": (19.67, 0.23),  # TIA-568 Cat 5e (per 100 m: 1.967 sqrt(f) + 0.023 f)
-    "cat6a": (18.2, 0.091),  # TIA-568 Cat 6A
-    "dsl_0.4mm": (22.5, 0.0),  # 0.4 mm (26 AWG) telephone twisted pair
-    "dsl_0.5mm": (17.5, 0.0),  # 0.5 mm (24 AWG) telephone twisted pair
+    "cat5e": (19.67, 0.23),  # TIA-568 Cat 5e (per 100 m: 1.967 sqrt(f) + 0.023 f + 0.050 / sqrt(f))
+    "cat6a": (18.2, 0.091),  # TIA-568 Cat 6A (per 100 m: 1.82 sqrt(f) + 0.0091 f + 0.25 / sqrt(f))
+    "dsl_0.4mm": (22.5, 0.0),  # 0.4 mm (26 AWG) telephone twisted pair, sqrt(f) fit
+    "dsl_0.5mm": (17.5, 0.0),  # 0.5 mm (24 AWG) telephone twisted pair, sqrt(f) fit
     "rg6_coax": (6.5, 0.003),  # RG-6 coaxial cable
     "backplane": (3.16, 1.0),  # FR-4 PCB trace (~0.1 dB/m/sqrt(GHz) + 1 dB/m/GHz)
 }
+LOW_FREQUENCY_TERM = {"cat5e": 0.50, "cat6a": 2.5}  # c in dB/km x sqrt(MHz), valid from 1 MHz
+DIELECTRIC_CONSTANT = {"backplane": 4.0, "rg6_coax": 1.5}  # others: polyethylene, 2.3
+
+# Primary constants of polyethylene-insulated cable at 70 F (ITU-T G.996.1, Annex A, Tables A.1/A.2):
+# frequency (Hz), R (ohm/mile, loop), L (mH/mile), G (umho/mile); C = 0.083 uF/mile for both gauges.
+_PIC_F = np.array([1, 5, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500, 700, 1e3, 1.5e3, 2e3, 3e3, 5e3, 7e3,
+                   1e4, 1.5e4, 2e4, 3e4, 5e4, 7e4, 1e5, 1.5e5, 2e5, 3e5, 5e5, 7e5, 1e6, 1.5e6, 2e6, 3e6, 5e6])
+_PIC_G = np.array([0, 0.001, 0.002, 0.003, 0.004, 0.005, 0.008, 0.011, 0.016, 0.022, 0.028, 0.040, 0.063, 0.084,
+                   0.115, 0.164, 0.210, 0.299, 0.466, 0.625, 0.853, 1.213, 1.558, 2.217, 3.458, 4.634, 6.320,
+                   8.993, 11.550, 16.436, 25.633, 34.351, 46.849, 66.665, 85.624, 121.841, 190.021])
+PIC_CABLES: dict[str, tuple[np.ndarray, np.ndarray]] = {
+    "pic_26awg": (
+        np.array([440.75] * 4 + [440.76] * 8 + [440.77, 440.78, 440.79, 440.81, 440.83, 440.88, 441.01, 441.15,
+                  441.39, 441.87, 442.83, 443.88, 447.81, 453.09, 463.39, 485.80, 513.04, 575.17, 699.61,
+                  812.95, 956.65, 1154.38, 1321.07, 1600.68, 2044.07]),
+        np.array([0.9861] * 13 + [0.9859, 0.9858, 0.9856, 0.9854, 0.9850, 0.9843, 0.9836, 0.9825, 0.9807,
+                  0.9789, 0.9758, 0.9660, 0.9546, 0.9432, 0.9306, 0.9212, 0.9062, 0.8816, 0.8614, 0.8331,
+                  0.8146, 0.8001, 0.7823, 0.7638])),
+    "pic_24awg": (
+        np.array([277.19] * 9 + [277.20] * 3 + [277.21, 277.22, 277.23, 277.25, 277.28, 277.34, 277.48, 277.66,
+                  277.96, 278.58, 279.35, 281.30, 286.82, 294.29, 308.41, 337.22, 369.03, 431.55, 541.69,
+                  632.08, 746.04, 902.84, 1035.03, 1256.77, 1608.38]),
+        np.array([0.9861] * 9 + [0.9860] * 3 + [0.9859, 0.9858, 0.9857, 0.9854, 0.9852, 0.9848, 0.9839, 0.9829,
+                  0.9816, 0.9793, 0.9770, 0.9723, 0.9577, 0.9464, 0.9347, 0.9204, 0.9087, 0.8885, 0.8570,
+                  0.8350, 0.8146, 0.7947, 0.7825, 0.7676, 0.7523])),
+}
+MILE_M = 1609.344
+CablePreset = Literal["cat5e", "cat6a", "dsl_0.4mm", "dsl_0.5mm", "rg6_coax", "backplane", "pic_26awg", "pic_24awg"]
+
+
+def pic_primary_constants(f: np.ndarray, preset: str) -> tuple[np.ndarray, ...]:
+    """R, L, G, C per metre of a G.996.1 PIC cable at |f| (log-frequency interpolation).
+
+    Above the 5 MHz end of the table R grows as sqrt(f), G as f and L stays constant.
+    """
+    r_mi, l_mi = PIC_CABLES[preset]
+    fa = np.maximum(np.abs(f), 1.0)
+    lf, lt = np.log10(np.minimum(fa, _PIC_F[-1])), np.log10(_PIC_F)
+    over = np.maximum(fa / _PIC_F[-1], 1.0)
+    r = np.interp(lf, lt, r_mi) * np.sqrt(over) / MILE_M
+    ind = np.interp(lf, lt, l_mi) * 1e-3 / MILE_M
+    g = np.interp(lf, lt, _PIC_G) * over * 1e-6 / MILE_M
+    return r, ind, g, np.full_like(r, 0.083e-6 / MILE_M)
+
+
+def pic_response(f: np.ndarray, preset: str, length_m: float, termination_ohm: float = 100.0) -> np.ndarray:
+    """Insertion transfer function of a PIC loop between equal resistive terminations (ABCD matrix).
+
+    H = 2 Z / (A Z + B + C Z^2 + D Z) with A = D = cosh(gamma l), B = Z0 sinh(gamma l),
+    C = sinh(gamma l) / Z0. The front delay l sqrt(L C) at the top of the table is removed.
+    """
+    r, ind, g, c = pic_primary_constants(f, preset)
+    w = 2 * np.pi * np.maximum(np.abs(f), 1.0)  # the table starts at 1 Hz (DC behaves like 1 Hz)
+    zs, ys = r + 1j * w * ind, g + 1j * w * c
+    x = np.sqrt(zs * ys) * length_m
+    z0 = np.sqrt(zs / ys)
+    z = termination_ohm
+    h = 2 * z / (2 * np.cosh(x) * z + z0 * np.sinh(x) + np.sinh(x) / z0 * z ** 2)
+    _, l_hi, _, c_hi = pic_primary_constants(np.array([_PIC_F[-1]]), preset)
+    h = h * np.exp(1j * w * length_m * np.sqrt(l_hi[0] * c_hi[0]))
+    return np.where(f < 0, np.conj(h), h)
+
+
+def dielectric_response(f: np.ndarray, loss_db_m_hz: float, length_m: float, eps_r: float = 4.0) -> np.ndarray:
+    """Causal dielectric loss (Djordjevic-Sarkar wideband permittivity), loss proportional to f.
+
+    eps(w) = eps_inf + d_eps / (m2 - m1) log10((w2 + j w) / (w1 + j w)) with w1 = 1e4 and
+    w2 = 1e12 rad/s has an almost constant loss tangent in between and is causal. The loss
+    tangent is set so that the attenuation is ``loss_db_m_hz`` x f, and eps' = eps_r at 1 GHz.
+    The response is exp(-j w l (sqrt(eps) - sqrt(eps_inf)) / c): the front delay is removed.
+    """
+    if loss_db_m_hz == 0:
+        return np.ones_like(f, dtype=np.complex128)
+    m1, m2 = 4.0, 12.0
+    c0 = 299_792_458.0
+    tan_d = loss_db_m_hz * c0 / (20 / np.log(10) * np.pi * np.sqrt(eps_r))
+    d_eps = tan_d * eps_r * (m2 - m1) * np.log(10) / (np.pi / 2)
+
+    def log_term(w):
+        return d_eps / (m2 - m1) * np.log10((10 ** m2 + 1j * w) / (10 ** m1 + 1j * w))
+
+    eps_inf = eps_r - float(np.real(log_term(2 * np.pi * 1e9)))
+    w = 2 * np.pi * np.asarray(f, dtype=float)
+    n = np.sqrt(eps_inf + log_term(w))
+    return np.exp(-1j * w * length_m * (n - np.sqrt(eps_inf)) / c0)
 
 
 def cable_response(f: np.ndarray, preset: str, length_m: float, a: float | None = None,
-                   b: float | None = None) -> np.ndarray:
-    """Complex frequency response of a cable (skin effect with its minimum-phase term).
+                   b: float | None = None, termination_ohm: float = 100.0) -> np.ndarray:
+    """Complex frequency response of a cable.
 
-    The skin-effect loss (proportional to sqrt(f)) comes with an equal phase term
-    (1 + j) sqrt(f), which produces the characteristic long, dispersive pulse tail.
+    * ``pic_*`` presets: RLCG transmission line with the ITU-T G.996.1 primary constants.
+    * Other presets: skin effect a sqrt(f) with its exact minimum phase, sqrt(j w), times a
+      causal dielectric loss b f (:func:`dielectric_response`). The TIA categories add the
+      term c / sqrt(f) of their insertion-loss formula (as attenuation only, held constant
+      below 1 MHz where the formula is not specified).
     """
+    if preset in PIC_CABLES:
+        return pic_response(f, preset, length_m, termination_ohm)
     pa, pb = CABLE_PRESETS[preset]
     a = pa if a is None else a
     b = pb if b is None else b
@@ -210,8 +300,9 @@ def cable_response(f: np.ndarray, preset: str, length_m: float, a: float | None 
     km = length_m / 1000
     neper = np.log(10) / 20
     skin = a * np.sqrt(f_mhz) * km * neper
-    dielectric = b * f_mhz * km * neper
-    return np.exp(-skin * (1 + 1j * np.sign(f)) - dielectric)
+    low = LOW_FREQUENCY_TERM.get(preset, 0.0) / np.sqrt(np.maximum(f_mhz, 1.0)) * km * neper
+    dielectric = dielectric_response(f, b * 1e-9, length_m, DIELECTRIC_CONSTANT.get(preset, 2.3))
+    return np.exp(-skin * (1 + 1j * np.sign(f)) - low) * dielectric
 
 
 def _require_fs(x: Signal, what: str) -> float:
@@ -226,12 +317,14 @@ class CopperLine(Block):
 
     The ``csi`` output carries the sampled impulse response (``csi_type="cir"``) so
     the ``linear_equalizer`` or ``dmt_demodulator`` can use it. Loss in dB/km is
-    ``a * sqrt(f_MHz) + b * f_MHz`` from the preset unless ``a`` / ``b`` are given.
+    ``a * sqrt(f_MHz) + b * f_MHz`` from the preset unless ``a`` / ``b`` are given; the
+    ``pic_26awg`` / ``pic_24awg`` presets are RLCG lines with the ITU-T G.996.1 constants.
     """
 
     class Params(BlockParams):
-        preset: Literal["cat5e", "cat6a", "dsl_0.4mm", "dsl_0.5mm", "rg6_coax", "backplane"] = "cat5e"
+        preset: CablePreset = "cat5e"
         length_m: float = Field(100.0, gt=0, description="Cable length in metres.")
+        termination_ohm: float = Field(100.0, gt=0, description="Source and load resistance (pic_* presets).")
         a: float | None = Field(None, ge=0, description="Skin-effect loss, dB/km/sqrt(MHz).")
         b: float | None = Field(None, ge=0, description="Dielectric loss, dB/km/MHz.")
         max_taps: int = Field(256, ge=4, description="Longest impulse response reported on csi.")
@@ -241,7 +334,10 @@ class CopperLine(Block):
 
     def response(self, f: np.ndarray) -> np.ndarray:
         p = self.params
-        return cable_response(f, p.preset, p.length_m, p.a, p.b)
+        return cable_response(f, p.preset, p.length_m, p.a, p.b, p.termination_ohm)
+
+    def frequency_response(self, f: np.ndarray, x: Signal) -> np.ndarray:
+        return self.response(f)
 
     def process(self, inputs: dict[str, Signal], ctx: RunContext) -> dict[str, Signal]:
         x = inputs["in"]
@@ -278,7 +374,7 @@ class Crosstalk(Block):
     class Params(BlockParams):
         model: Literal["next", "fext"] = "next"
         n_disturbers: int = Field(10, ge=1, le=100)
-        preset: Literal["cat5e", "cat6a", "dsl_0.4mm", "dsl_0.5mm", "rg6_coax", "backplane"] = "dsl_0.4mm"
+        preset: CablePreset = "dsl_0.4mm"
         length_m: float = Field(1000.0, gt=0, description="Coupling length (FEXT) in metres.")
 
     inputs = {"in": Port(Kind.SYMBOLS | Kind.SAMPLES), "tx": Port(Kind.SYMBOLS | Kind.SAMPLES, required=False)}
@@ -420,6 +516,9 @@ class CTLE(Block):
         return 10 ** (p.dc_gain_db / 20) * (1 + s / (2 * np.pi * p.zero_hz)) / (
             (1 + s / (2 * np.pi * p.pole1_hz)) * (1 + s / (2 * np.pi * p.pole2_hz)))
 
+    def frequency_response(self, f: np.ndarray, x: Signal) -> np.ndarray:
+        return self.response(f)
+
     def process(self, inputs: dict[str, Signal], ctx: RunContext) -> dict[str, Signal]:
         x = inputs["in"]
         y = apply_frequency_response(x.data, self.response, _require_fs(x, "ctle"), pad=256)
@@ -546,7 +645,7 @@ class DMTModulator(Block):
         gap_db: float = Field(9.8, description="SNR gap (9.8 dB: uncoded QAM at BER 1e-7).")
         margin_db: float = Field(3.0)
         snr_db: float = Field(60.0, description="Expected AWGN SNR (awgn 'snr' mode).")
-        line_preset: Literal["cat5e", "cat6a", "dsl_0.4mm", "dsl_0.5mm", "rg6_coax", "backplane"] = "dsl_0.4mm"
+        line_preset: CablePreset = "dsl_0.4mm"
         line_length_m: float = Field(2000.0, gt=0)
 
     inputs = {"in": Port(Kind.BITS)}

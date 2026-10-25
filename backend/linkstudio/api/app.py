@@ -23,7 +23,9 @@ from linkstudio.api.editor import (
 )
 from linkstudio.api.jobs import THEORY_CURVES, JobManager, _clean
 from linkstudio.api.probes import compute_probes
+from linkstudio.api.response import block_response
 from linkstudio.core import Simulation, block_catalogue
+from linkstudio.core.parallel import cpu_count
 
 BACKEND_DIR = Path(linkstudio.__file__).resolve().parents[1]
 SCENARIO_DIR = BACKEND_DIR / "scenarios"
@@ -47,7 +49,7 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------ catalogue
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"status": "ok", "version": linkstudio.__version__}
+        return {"status": "ok", "version": linkstudio.__version__, "cpu_count": cpu_count()}
 
     @app.get("/api/blocks")
     def blocks() -> dict[str, Any]:
@@ -113,6 +115,15 @@ def create_app() -> FastAPI:
     def validate(editor: dict[str, Any]) -> dict[str, Any]:
         return validate_editor(editor, SCENARIO_DIR)
 
+    @app.post("/api/response")
+    def response(request: dict[str, Any]) -> dict[str, Any]:
+        editor = request["graph"]
+        try:
+            graph = build_graph(editor, SCENARIO_DIR)
+            return _clean(block_response(graph, request["block"], int(editor.get("seed", 0))))
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
+
     # ----------------------------------------------------------------- jobs
     @app.post("/api/jobs")
     def start_job(request: dict[str, Any]) -> dict[str, Any]:
@@ -133,9 +144,10 @@ def create_app() -> FastAPI:
     # ----------------------------------------------------------------- live
     @app.websocket("/api/live")
     async def live(ws: WebSocket) -> None:
-        """Interactive mode: run batch after batch and stream probe data.
+        """Interactive mode: run one frame per step and stream probe data.
 
-        Client messages: ``start`` {graph, rate}, ``set_param`` {path, value},
+        Live mode always simulates a single frame per step (batch size 1): the scopes show
+        one frame and the metrics accumulate across steps. Client messages: ``start`` {graph, rate}, ``set_param`` {path, value},
         ``probes`` {probes}, ``reset``, ``stop``.
         """
         await ws.accept()
@@ -149,8 +161,7 @@ def create_app() -> FastAPI:
                     editor = msg["graph"]
                     try:
                         graph = build_graph(editor, SCENARIO_DIR)
-                        sim = Simulation(graph, batch_size=int(editor.get("batch_size", 32)),
-                                         seed=int(editor.get("seed", 0)))
+                        sim = Simulation(graph, batch_size=1, seed=int(editor.get("seed", 0)))
                         sim.reset()
                     except Exception as exc:
                         await ws.send_json({"type": "error", "error": str(exc)})

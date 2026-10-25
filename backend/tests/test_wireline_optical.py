@@ -6,7 +6,9 @@ import pytest
 import linkstudio as cs
 from linkstudio.phy import theory
 from linkstudio.phy.optical import beta2, dbm_to_w
-from linkstudio.phy.wireline import CABLE_PRESETS, cable_response, waterfill_bits
+from linkstudio.phy.wireline import (
+    CABLE_PRESETS, LOW_FREQUENCY_TERM, cable_response, dielectric_response, waterfill_bits,
+)
 from helpers import ber_at
 
 
@@ -68,11 +70,30 @@ def test_nrz_real_awgn_matches_bpsk_theory():
 
 
 def test_cable_insertion_loss_matches_preset():
+    # TIA-568 Cat 5e per 100 m: 1.967 sqrt(f) + 0.023 f + 0.050 / sqrt(f), f in MHz.
     f = np.array([1e6, 10e6, 100e6])
     loss_db = -20 * np.log10(np.abs(cable_response(f, "cat5e", 100.0)))
     a, b = CABLE_PRESETS["cat5e"]
-    expected = 0.1 * (a * np.sqrt(f / 1e6) + b * f / 1e6)
-    assert np.allclose(loss_db, expected)
+    expected = 0.1 * (a * np.sqrt(f / 1e6) + b * f / 1e6 + LOW_FREQUENCY_TERM["cat5e"] / np.sqrt(f / 1e6))
+    assert np.allclose(loss_db, expected, rtol=2e-3)
+
+
+def test_pic_loop_matches_g9961_insertion_loss():
+    # G.996.1 Table 2, loop Mid-C (1829 m of 26 AWG) between 100-ohm terminations at 70 F.
+    f = np.array([20, 40, 100, 200, 300, 500, 600, 780, 1100]) * 1e3
+    table = np.array([13.3, 16.2, 20.0, 23.4, 26.8, 33.2, 36.3, 41.3, 49.1])
+    loss_db = -20 * np.log10(np.abs(cable_response(f, "pic_26awg", 1828.8)))
+    assert np.max(np.abs(loss_db - table)) < 0.35
+
+
+def test_dielectric_loss_is_linear_and_causal():
+    f = np.array([1e7, 1e8, 1e9])
+    assert np.allclose(-20 * np.log10(np.abs(dielectric_response(f, 1e-9, 1.0))), f * 1e-9, rtol=0.01)
+    fs, n = 200e9, 8192
+    h = np.fft.ifft(cable_response(np.fft.fftfreq(n, 1 / fs), "backplane", 1.0)).real
+    assert np.sum(h[n // 2:] ** 2) / np.sum(h ** 2) < 1e-5  # no energy before t = 0 (second half)
+    for ff in (f, -f):  # Hermitian response for real signals
+        assert np.allclose(dielectric_response(-ff, 1e-9, 1.0), np.conj(dielectric_response(ff, 1e-9, 1.0)))
 
 
 def serdes_link(eq: bool):
@@ -394,3 +415,117 @@ def test_ofdm_sync_recovers_delay_and_cfo():
     res = link(True)
     assert res["ber.ber"] < 1e-3
     assert abs(res["sync.cfo_estimate"] - 60e3) < 3e3
+
+
+# ------------------------------------------------- fiber, transmitter and FSO upgrades
+def test_dispersion_slope_gives_the_group_delay_of_d_and_s():
+    from linkstudio.phy.optical import C_LIGHT, dispersion_operator
+    fs, n = 4e12, 1 << 14
+    f = np.fft.fftshift(np.fft.fftfreq(n, 1 / fs))
+    phase = np.unwrap(np.angle(np.fft.fftshift(dispersion_operator(n, fs, 17.0, 1550.0, 0.057))))
+    tau = -np.gradient(phase, 2 * np.pi * f)
+    nu0 = C_LIGHT / 1550e-9
+    dlam = (C_LIGHT / (nu0 - f) - 1550e-9) * 1e9  # positive NumPy frequency = lower optical frequency
+    expected = (17.0 * dlam + 0.057 / 2 * dlam ** 2) * 1e-12  # 1 km
+    sel = np.abs(f) < 1e12
+    assert np.max(np.abs(tau[sel] - expected[sel])) < 0.05e-12  # of up to 138 ps
+
+
+def test_waveplate_pmd_has_maxwellian_dgd():
+    from linkstudio.phy.optical import pmd_transfer
+    dw = 2 * np.pi * 1e8
+    t = pmd_transfer(np.random.default_rng(0), 4000, np.array([-dw, 0.0, dw]), 10e-12, 10)
+    td = (t[:, 2] - t[:, 0]) / (2 * dw)
+    m = 1j * np.einsum("bij,bkj->bik", td, t[:, 1].conj())
+    ev = np.linalg.eigvalsh((m + np.conj(np.transpose(m, (0, 2, 1)))) / 2)
+    dgd = ev[:, 1] - ev[:, 0]
+    assert np.mean(dgd) == pytest.approx(10e-12, rel=0.03)
+    assert np.mean(dgd ** 2) / np.mean(dgd) ** 2 == pytest.approx(3 * np.pi / 8, rel=0.03)
+
+
+def test_nonlinear_phase_step_criterion_keeps_the_soliton():
+    from linkstudio.phy.optical import propagate
+    t0 = 5e-12
+    b2 = abs(beta2(17.0, 1550.0))
+    p0 = b2 / (1.3e-3 * t0 ** 2)
+    fs, n = 2e12, 4096
+    t = (np.arange(n) - n / 2) / fs
+    e0 = (np.sqrt(p0) / np.cosh(t / t0))[None, :].astype(complex)
+    length = 4 * t0 ** 2 / b2 / 1e3
+    out = propagate(e0, fs, length, 0.0, 17.0, 1550.0, True, 1.3, 0.5, 0.0, 0.05)
+    assert np.linalg.norm(np.abs(out) - np.abs(e0)) / np.linalg.norm(np.abs(e0)) < 1e-3
+
+
+def test_cd_compensation_removes_dispersion_slope():
+    from linkstudio.core import Kind, Signal
+    fs, n = 1e12, 4096
+    t = (np.arange(n) - n / 2) / fs
+    e = np.exp(-t ** 2 / (2 * (2e-12) ** 2))[None, :].astype(complex) * 1e-2
+    sig = Signal(e, Kind.SAMPLES, fs=fs, meta={"optical": True, "wavelength_nm": 1550.0, "power": 1e-4})
+    fib = cs.create_block("fiber", length_km=2.0, attenuation_db_km=0.0, dispersion_slope_ps_nm2_km=0.057)
+    fib.reset(0, "f")
+    y = fib.process({"in": sig}, None)["out"]
+    z = cs.create_block("cd_compensation").process({"in": y}, None)["out"]
+    assert np.allclose(z.data, e, atol=1e-8)
+    assert z.meta["cd_slope_ps_nm2"] == pytest.approx(0.0)
+
+
+def test_coherent_receiver_splits_lo_between_polarizations():
+    from linkstudio.core import Kind, Signal
+    e = np.full((1, 2, 64), np.sqrt(0.5e-3), dtype=complex)  # 1 mW over two polarizations
+    sig = Signal(e, Kind.SAMPLES, fs=10e9, meta={"optical": True, "power": 1e-3})
+    rx = cs.create_block("coherent_receiver", lo_power_dbm=10.0, lo_linewidth_hz=0.0, shot_noise=False,
+                         thermal_noise_pa_rthz=0.0, responsivity=1.0)
+    rx.reset(0, "rx")
+    y = rx.process({"in": sig}, None)["out"]
+    # Each polarization beats with half of the 10 mW LO: |i| = R sqrt(P_LO / 2) |E|.
+    assert np.allclose(np.abs(y.data), np.sqrt(5e-3) * np.sqrt(0.5e-3))
+
+
+def test_adiabatic_chirp_shifts_frequency_with_power():
+    from linkstudio.core import Kind, Signal
+    fs, n = 100e9, 4000
+    drive = np.where(np.arange(n) < n // 2, -1.0, 1.0)[None, :]
+    sig = Signal(drive, Kind.SAMPLES, fs=fs, meta={})
+    tx = cs.create_block("intensity_modulator", power_dbm=0.0, extinction_ratio_db=10.0, adiabatic_chirp_ghz_mw=2.0)
+    tx.reset(0, "tx")
+    e = tx.process({"in": sig}, None)["out"].data[0]
+    freq = np.diff(np.unwrap(np.angle(e))) * fs / (2 * np.pi)
+    p1, p0 = 2e-3 / (1 + 0.1), 2e-3 / (1 + 10)  # levels for ER = 10 dB around 1 mW
+    assert np.median(freq[n // 2 + 10:]) - np.median(freq[:n // 2 - 10]) == pytest.approx(2e9 * (p1 - p0) / 1e-3,
+                                                                                          rel=1e-3)
+
+
+def test_gamma_gamma_parameters_from_rytov_variance():
+    from linkstudio.phy.optical import gamma_gamma_parameters, rytov_variance
+    a, b = gamma_gamma_parameters(1.0)
+    assert (a, b) == (pytest.approx(4.39, abs=0.01), pytest.approx(2.56, abs=0.01))
+    k = 2 * np.pi / 1550e-9
+    assert rytov_variance(1e-14, 1550.0, 1000.0) == pytest.approx(1.23e-14 * k ** (7 / 6) * 1000 ** (11 / 6))
+    blk = cs.create_block("fso_turbulence", model="gamma_gamma", rytov_variance=1.0)
+    blk.reset(1, "t")
+    h = blk.draw(200000)
+    assert np.var(h) == pytest.approx(1 / a + 1 / b + 1 / (a * b), rel=0.05)
+
+
+def test_fso_channel_budget_and_pointing_loss():
+    from linkstudio.core import Kind, Signal
+    from linkstudio.phy.optical import geometric_loss_db, kim_attenuation_db_km
+    assert kim_attenuation_db_km(1.0, 1550.0) == pytest.approx(17 * (550 / 1550) ** 0.5)
+    assert geometric_loss_db(1000.0, 2.0, 0.08) == pytest.approx(20 * np.log10(2.0 / 0.08))
+    assert geometric_loss_db(10.0, 2.0, 0.08) == 0.0  # the aperture catches the whole beam
+    sig = Signal(np.ones((20000, 4), dtype=complex), Kind.SAMPLES, fs=1e9,
+                 meta={"optical": True, "wavelength_nm": 1550.0, "power": 1.0})
+    ch = cs.create_block("fso_channel", distance_m=1000.0, visibility_km=2.0, turbulence="none",
+                         pointing_jitter_m=0.3)
+    ch.reset(2, "fso")
+    y = ch.process({"in": sig}, None)["out"]
+    m = ch.metrics()
+    assert m["atmospheric_loss_db"] == pytest.approx(kim_attenuation_db_km(2.0, 1550.0))
+    # E[exp(-2 r^2 / w^2)] for Rayleigh r with sigma_s: w^2 / (w^2 + 4 sigma_s^2)
+    from scipy.special import erf
+    wz, a = 1.0, 0.04
+    v = np.sqrt(np.pi / 2) * a / wz
+    w2 = wz ** 2 * np.sqrt(np.pi) * erf(v) / (2 * v * np.exp(-v ** 2))
+    assert m["pointing_loss_db"] == pytest.approx(-10 * np.log10(w2 / (w2 + 4 * 0.09)), abs=0.05)
+    assert y.meta["power"] == pytest.approx(10 ** (-(m["atmospheric_loss_db"] + m["geometric_loss_db"]) / 10))

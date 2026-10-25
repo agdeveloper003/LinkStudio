@@ -1,0 +1,30 @@
+name: 25G VCSEL multimode data-center link
+category: Optical
+description: One lane of a 100GBASE-SR4-like link inside a data center. A 25.78 GBd NRZ
+  850 nm VCSEL drives OM4 multimode fiber into a PIN receiver with a 4th-order
+  Bessel-Thomson response at 0.75 times the symbol rate. Sweep fib.length_m from 50 to 600 m
+  and compare fib.fiber_type OM3 / OM4 to see modal and chromatic dispersion close the eye;
+  set fib.model to mode_groups and fib.launch to gaussian for the restricted-launch view.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  map: {type: mapper, params: {scheme: pam, order: 2, symbol_rate: 25781250000.0}}
+  tx: {type: pulse_shaper, params: {shape: rect, sps: 4}}
+  laser: {type: vcsel, params: {power_dbm: -4.0, extinction_ratio_db: 4.0, resonance_ghz: 20.0,
+    damping_per_ns: 100.0, parasitic_ghz: 20.0, rin_db_hz: -140.0, spectral_width_nm: 0.4}}
+  fib: {type: multimode_fiber, params: {fiber_type: OM4, length_m: 100.0}}
+  opm: {type: optical_power_meter}
+  pd: {type: photodiode, params: {responsivity: 0.6, thermal_noise_pa_rthz: 20.0, bandwidth_ghz: 19.34}}
+  rx: {type: matched_filter, params: {shape: none}}
+  agc: {type: agc}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+chain: [src, map, tx, laser, fib, pd, rx, agc, demap, ber.rx]
+edges:
+  - fib.out -> opm.in
+  - src.out -> ber.tx
+probes:
+  - {key: pd.out, view: eye}
+  - {key: laser.out, view: time}
+  - {key: agc.out, view: constellation}

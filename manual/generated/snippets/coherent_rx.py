@@ -3,7 +3,8 @@ bridge = walk[:, :n] - np.arange(n) / n * walk[:, n:n + 1]
 fo = np.round(p.frequency_offset_hz * n / fs) * fs / n
 phase = bridge + 2 * np.pi * fo * np.arange(n) / fs
 lo = np.exp(-1j * (phase[:, None, :] if e.ndim == 3 else phase))
-p_lo = dbm_to_w(p.lo_power_dbm)
+npol = e.shape[1] if e.ndim == 3 else 1
+p_lo = dbm_to_w(p.lo_power_dbm) / npol  # a polarization splitter feeds one hybrid per polarization
 scale = p.responsivity * np.sqrt(p_lo)
 bw = fs / 2
 var = 2 * (p.thermal_noise_pa_rthz * 1e-12) ** 2 * bw

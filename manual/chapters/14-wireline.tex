@@ -97,10 +97,13 @@ $\gamma=\sqrt{(R+j\omega L)(G+j\omega C)}=\alpha+j\beta$. Two loss mechanisms do
   and the attenuation $\alpha_s\propto\sqrt f$;
   \item \emph{dielectric loss}: $G\propto f$ gives $\alpha_d\propto f$.
 \end{itemize}
-In dB per km,
+For the fitted presets, in dB per km,
 \begin{equation}
-  \alpha_{\mathrm{dB}}(f)=a\sqrt{f_{\mathrm{MHz}}}+b\,f_{\mathrm{MHz}} .
+  \alpha_{\mathrm{dB}}(f)=a\sqrt{f_{\mathrm{MHz}}}+b\,f_{\mathrm{MHz}}\;\Big(+\;c/\sqrt{f_{\mathrm{MHz}}}\Big) .
 \end{equation}
+The last term belongs to the TIA-568 category formulas (Cat\,5e: $c=0.050$ per 100\,m, Cat\,6A: 0.25)
+and is held constant below 1\,MHz, where the formula is not specified. It is applied as an
+attenuation only; it is a fraction of a dB in the Ethernet band.
 
 \begin{keypoint}[Causality fixes the phase]
 A causal, minimum-phase channel cannot have an arbitrary attenuation: the log-magnitude and the
@@ -117,8 +120,65 @@ the $\sqrt f$ loss comes with an \emph{equal} $\sqrt f$ phase lag. LinkStudio th
 with $\alpha$ in nepers. Dropping the phase would produce a symmetric, non-causal pulse;
 keeping it produces the long causal tail characteristic of copper (\cref{fig:cable}, right),
 which is what makes DSL and Ethernet equalizers work hard.
+
+The dielectric term needs the same care. A loss exactly proportional to $|f|$ at all frequencies
+violates the Paley--Wiener condition, so it has no exact causal partner; its Hilbert transform
+diverges logarithmically. Physical dielectrics have a nearly constant loss tangent over a wide but
+finite band. The Djordjevic--Sarkar permittivity~\cite{djordjevic2001} captures this:
+\[
+  \varepsilon(\omega)=\varepsilon_\infty+\frac{\Delta\varepsilon}{m_2-m_1}\log_{10}\frac{\omega_2+j\omega}{\omega_1+j\omega},
+  \qquad \omega_{1,2}=10^{m_{1,2}}\ \mathrm{rad/s}.
+\]
+It is a continuum of Debye relaxations, hence causal, and its loss tangent is nearly flat between
+$\omega_1$ and $\omega_2$. LinkStudio uses $m_1=4$, $m_2=12$, sets $\tan\delta$ so that the
+attenuation is $b\,f$ (within 1\,\% from 10\,MHz to 1\,GHz) and $\varepsilon'(1\,\mathrm{GHz})=\varepsilon_r$
+(4.0 for FR-4, 2.3 for polyethylene, 1.5 for foamed coax). It then applies
+$e^{-j\omega\ell(\sqrt{\varepsilon(\omega)}-\sqrt{\varepsilon_\infty})/c}$; subtracting
+$\sqrt{\varepsilon_\infty}$ removes only the front delay. On the 1\,m backplane the energy of the
+impulse response before $t=0$ drops from 40\,\% (zero-phase dielectric term) to $5\times10^{-7}$.
 \end{keypoint}
-\codeexcerpt{cable}{Cable response with skin-effect phase (\file{wireline.py}).}
+\codeexcerpt{cable}{Cable response: skin effect with its phase, TIA term and causal dielectric (\file{wireline.py}).}
+\codeexcerpt{dielectric}{Djordjevic--Sarkar dielectric response.}
+
+\subsection{Telephone loops from primary constants}
+DSL standards specify loops through their primary constants, not through fitted losses.
+ITU-T G.996.1 Annex~A~\cite{g9961} tabulates $R$, $L$, $G$ and $C$ of polyethylene-insulated
+26\,AWG (0.4\,mm) and 24\,AWG (0.5\,mm) cable from 1\,Hz to 5\,MHz. The \code{pic_26awg} and
+\code{pic_24awg} presets interpolate these tables at 70\,\textdegree F in $\log f$. Above 5\,MHz
+they extend them with $R\propto\sqrt f$, $G\propto f$ and constant $L$, $C$. The loop is a
+two-port with ABCD matrix
+\begin{equation}
+  \begin{pmatrix}A&B\\C&D\end{pmatrix}=\begin{pmatrix}\cosh\gamma\ell & Z_0\sinh\gamma\ell\\ \sinh(\gamma\ell)/Z_0 & \cosh\gamma\ell\end{pmatrix},\qquad
+  Z_0=\sqrt{\frac{R+j\omega L}{G+j\omega C}},
+\end{equation}
+between source and load resistances $Z_S=Z_L=Z$ (\prm{termination_ohm}, 100\,$\Omega$ as in
+G.996.1). The insertion transfer function relative to a direct connection is
+\begin{equation}
+  H(f)=\frac{2Z}{AZ+B+CZ^2+DZ} .
+\end{equation}
+Unlike the $\sqrt f$ fit, this model has the right low-frequency behaviour: below about 20\,kHz the
+loss is set by the DC resistance $R_0\ell$ and the impedance mismatch, not by $\sqrt f$. G.996.1
+also publishes the insertion loss of its test loops. \Cref{fig:pic} compares the model with
+Table~2 for the Mid-C loop (1829\,m of 26\,AWG): the deviation is below 0.3\,dB from 20\,kHz to
+1.1\,MHz, the rounding of the table. The \emph{ADSL-like DMT} scenario now runs over this loop.
+\codeexcerpt{pic}{ABCD response of a PIC loop.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogxaxis}[width=10cm,height=5.6cm,xlabel={frequency [kHz]},ylabel={insertion loss [dB]},
+  xmin=10,xmax=2000,ymin=0,ymax=70,legend pos=north west]
+  \addplot[th=accent] table[x=f_khz,y=model]{\datafile{pic_loss}};
+  \addplot[only marks,mark=square*,mark size=1.6pt,accent2] table[x=f_khz,y=table]{\datafile{pic_g9961}};
+  \addplot[th=black!50,dashed] table[x=f_khz,y=fit]{\datafile{pic_loss}};
+  \legend{\code{pic_26awg} (RLCG + ABCD),{G.996.1 Table 2, Mid-C},\code{dsl_0.4mm} ($\sqrt f$ fit)}
+\end{semilogxaxis}
+\end{tikzpicture}
+\caption{Insertion loss of 1829\,m of 26\,AWG cable between 100\,$\Omega$ terminations: RLCG model
+from the G.996.1 primary constants against the values published in G.996.1 Table~2, and the
+earlier $\sqrt f$ fit for comparison.}
+\label{fig:pic}
+\end{figure}
 
 \begin{figure}[htbp]
 \centering
@@ -148,8 +208,9 @@ zero-phase response with the same magnitude, shifted by 20\,\si{\micro s}.}
 \blk{copper_line} applies $H(f)$ in the frequency domain, with zero padding to avoid circular
 wrap-around. It publishes the sampled impulse response, truncated at 99.95\,\% of its energy,
 on \code{csi} (\meta{csi_type}\code{="cir"}), for \blk{linear_equalizer} or the DMT FEQ.
-Presets: Cat\,5e, Cat\,6A, 0.4 and 0.5\,mm telephone pairs, RG-6 coax and an FR-4 backplane
-trace.
+Presets: Cat\,5e, Cat\,6A, 0.4 and 0.5\,mm telephone pairs (fit and G.996.1 RLCG), RG-6 coax
+and an FR-4 backplane trace. The RLCG presets remove only the front delay $\ell\sqrt{LC}$; the
+remaining dispersive delay is part of the channel.
 \end{incode}
 
 % ------------------------------------------------------------------

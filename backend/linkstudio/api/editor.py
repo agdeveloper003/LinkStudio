@@ -4,7 +4,8 @@ Editor graph format::
 
     {
       "name": "qpsk", "seed": 1, "batch_size": 32,
-      "blocks": {"awgn": {"type": "awgn", "params": {...all params...}, "position": {"x": 0, "y": 0}},
+      "blocks": {"awgn": {"type": "awgn", "params": {...all params...}, "position": {"x": 0, "y": 0},
+                          "ports": {"in": {"side": "left", "offset": 0.5}}},
                  "tx":   {"type": "subsystem", "spec": {"file": "subsystems/tx.yaml"}, ...}},
       "edges": [{"source": "map.out", "target": "awgn.in"}],
       "probes": [{"key": "awgn.out", "view": "constellation"}],
@@ -100,6 +101,7 @@ def spec_to_editor(spec: dict[str, Any], base_dir: Path) -> dict[str, Any]:
     """Scenario dictionary (as loaded from YAML) -> editor JSON with full parameters."""
     graph = graph_from_dict(spec, base_dir, name=spec.get("name", "scenario"))
     layout = spec.get("layout") or {}
+    port_layout = spec.get("port_layout") or {}
     auto = _auto_layout(graph)
     blocks: dict[str, Any] = {}
     for name, block in graph.blocks.items():
@@ -112,6 +114,9 @@ def spec_to_editor(spec: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         else:
             blocks[name] = {"type": block.type_name, "params": block.params.model_dump(mode="json"),
                             "position": position}
+        if port_layout.get(name):
+            blocks[name]["ports"] = {port: {"side": side, "offset": float(offset)}
+                                     for port, (side, offset) in port_layout[name].items()}
     edges = [{"source": str(src), "target": str(dst)} for dst, src in graph.edges.items()]
     editor = {
         "name": spec.get("name", "scenario"),
@@ -178,6 +183,7 @@ def editor_to_yaml_dict(editor: dict[str, Any]) -> dict[str, Any]:
     """Editor JSON -> scenario dictionary for saving (only non-default parameters)."""
     blocks: dict[str, Any] = {}
     layout: dict[str, list[float]] = {}
+    port_layout: dict[str, dict[str, list[Any]]] = {}
     for name, b in (editor.get("blocks") or {}).items():
         if b.get("type") == "subsystem":
             blocks[name] = {"type": "subsystem", **(b.get("spec") or {})}
@@ -187,6 +193,8 @@ def editor_to_yaml_dict(editor: dict[str, Any]) -> dict[str, Any]:
         pos = b.get("position")
         if pos:
             layout[name] = [round(float(pos["x"]), 1), round(float(pos["y"]), 1)]
+        if b.get("ports"):
+            port_layout[name] = {port: [v["side"], round(float(v["offset"]), 3)] for port, v in b["ports"].items()}
     out: dict[str, Any] = {"name": editor.get("name", "scenario")}
     for key in ("category", "description"):
         if editor.get(key):
@@ -200,4 +208,6 @@ def editor_to_yaml_dict(editor: dict[str, Any]) -> dict[str, Any]:
     if editor.get("probes"):
         out["probes"] = editor["probes"]
     out["layout"] = layout
+    if port_layout:
+        out["port_layout"] = port_layout
     return out

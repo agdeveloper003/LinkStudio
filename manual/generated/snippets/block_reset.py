@@ -6,4 +6,8 @@ def reset(self, seed: int, path: str) -> None:
     reproducible random stream.
     """
     self.rng = np.random.default_rng([seed, zlib.crc32(path.encode())])
-    self.on_reset()
+    self.__dict__["_recording"] = set()
+    try:
+        self.on_reset()
+    finally:
+        self.__dict__["_state_keys"] = tuple(sorted(self.__dict__.pop("_recording")))

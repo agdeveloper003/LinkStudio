@@ -12,7 +12,7 @@ third, visual check of the same models.
 \section{Running the checks}
 \begin{lstlisting}[style=shell]
 cd backend
-python -m pytest                 # all tests (about 170, a few minutes)
+python -m pytest                 # all tests (about 220, a few minutes)
 python -m pytest tests/test_physics.py -q
 python scripts/main.py           # demos: simulated vs theory, PASS/FAIL per check
 python scripts/main.py --quick   # fewer errors per point, faster
@@ -64,6 +64,18 @@ IM/DD PAM-4 & dispersion-induced power fading & \file{test_wireline_optical.py}\
 Coherent DP-QPSK & BER vs OSNR theory within $\approx0.3$\,dB; FO estimate & \file{test_wireline_optical.py}\\
 FSO & mean and variance of the scintillation & \file{test_wireline_optical.py}, \cref{fig:fso}\\
 WDM & XPM lowers the MER of the centre channel & \file{test_wireline_optical.py}\\
+Multimode fiber & $\alpha_{\mathrm{opt}}$, $\sigma_{\min}$, WKB delay, continuum limit, class bandwidths, launch closed forms, variance additivity & \file{test_multimode.py}, \cref{fig:mmf-profile,fig:mmf-launch}\\
+VCSEL, receiver & 3-dB bandwidth limit, ER, power; Bessel--Thomson noise bandwidth; data-center reach & \file{test_multimode.py}, \cref{fig:mmf-eyes}\\
+Fading generator & Zheng--Xiao: $R_h=J_0$, uncorrelated I/Q & \file{test_channels.py}, \cref{fig:jakes}\\
+NR TDL profiles & unit normalized delay spread; TDL-D $K_1=13.3$\,dB; fractional delay & \file{test_channels.py}\\
+Path loss & P.525; TR~38.901 breakpoint continuity, NLOS $\ge$ LOS, shadowing, LOS probability & \file{test_propagation.py}, \cref{fig:pathloss}\\
+Thermal noise & $k_BTF f_s$; free-space QPSK link budget BER & \file{test_propagation.py}\\
+Copper loops & G.996.1 Mid-C insertion loss within 0.35\,dB; causal dielectric & \file{test_wireline_optical.py}, \cref{fig:pic}\\
+Dispersion slope & group delay $D\ell\Delta\lambda+\frac{S\ell}2\Delta\lambda^2$; CD+slope compensation & \file{test_wireline_optical.py}\\
+PMD & Maxwellian DGD (mean, $\langle\tau^2\rangle/\langle\tau\rangle^2$) & \file{test_wireline_optical.py}, \cref{fig:pmd}\\
+Adaptive split step & soliton error $<10^{-3}$ with default criterion & \file{test_wireline_optical.py}\\
+DML, coherent RX & adiabatic chirp frequency step; LO split per polarization & \file{test_wireline_optical.py}\\
+FSO channel & $\alpha,\beta$ from $\sigma_R^2$; Kim, geometric and pointing losses & \file{test_wireline_optical.py}\\
 CP-based OFDM sync & recovers delay and CFO & \file{test_wireline_optical.py}\\
 Confidence interval & Wilson bounds contain the BER & \file{test_wireline_optical.py}\\
 All scenarios & load, validate, run; BER below a threshold & \file{test_scenarios.py}\\
@@ -75,7 +87,9 @@ All scenarios & load, validate, run; BER below a threshold & \file{test_scenario
 Every model in this manual states its assumptions; the most important simplifications are
 collected here.
 \begin{itemize}
-  \item Lasers are behavioural (no rate equations); PMD is first order with the mean DGD.
+  \item Laser dynamics are small-signal (no large-signal rate equations). The multimode fiber
+  omits mode-partition and modal noise.
+  \item FSO fading is quasi-static (no time correlation, aperture averaging or beam wander).
   \item WDM simulates the full multi-channel field but demodulates only one channel.
   \item The OFDM CP synchronizer estimates the fractional CFO only.
   \item DMT adapts bits to a flat transmit PSD (no power water-filling).

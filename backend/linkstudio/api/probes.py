@@ -45,19 +45,35 @@ def _flat(sig: Signal, max_points: int) -> np.ndarray:
     return d
 
 
+def _unit(sig: Signal) -> str:
+    return sig.meta.get("unit") or ""
+
+
+def _psd_unit(unit: str) -> tuple[str, float]:
+    """Unit of 10 log10(PSD) and the offset to add, for samples in ``unit``."""
+    if unit == "√W":
+        return "dBm/Hz", 30.0
+    if unit:
+        return f"dB{unit}²/Hz", 0.0
+    return "dB/Hz", 0.0
+
+
 def compute_view(sig: Signal, view: str, max_points: int = 2000) -> dict[str, Any]:
     """Plot data for one signal.
 
     Returned dict has a ``type``: ``scatter`` (I/Q points), ``line`` (x + series),
-    ``eye`` (overlaid traces) or ``heatmap``.
+    ``eye`` (overlaid traces) or ``heatmap``. Physical quantities are sent in base SI
+    units together with their unit (``xunit``, ``yunit``, ``unit``); the UI chooses
+    the prefix (ps, GHz, mA, ...).
     """
+    unit = _unit(sig)
     if view == "constellation":
         pts = _flat(sig, max_points)
-        out: dict[str, Any] = {"type": "scatter", "i": _f(pts.real), "q": _f(pts.imag)}
+        out: dict[str, Any] = {"type": "scatter", "i": _f(pts.real), "q": _f(pts.imag), "unit": unit}
         const = sig.meta.get("constellation")
         rms = float(np.sqrt(np.mean(np.abs(pts) ** 2))) if pts.size else 0.0
         # Reference points only when the signal is at symbol scale (not e.g. a photocurrent in A).
-        if const is not None and const.order <= 256 and 0.25 < rms < 4:
+        if const is not None and const.order <= 256 and 0.25 < rms < 4 and not unit:
             out.update(ref_i=_f(const.points.real), ref_q=_f(const.points.imag))
         return out
 
@@ -65,18 +81,28 @@ def compute_view(sig: Signal, view: str, max_points: int = 2000) -> dict[str, An
         data = np.asarray(sig.data)
         data = data.reshape(-1, data.shape[-1])[:16]
         f, p = psd(data, sig.fs or 1.0, nperseg=min(512, data.shape[-1]))
-        p_db = 10 * np.log10(np.maximum(p, 1e-30))
-        return {"type": "line", "x": _f(f, 1), "series": {"PSD": _f(p_db - p_db.max(), 2)},
-                "xlabel": "Frequency [Hz]" if sig.fs else "Normalized frequency", "ylabel": "dB"}
+        if not np.iscomplexobj(data):  # real signal: one-sided density
+            keep = f >= 0
+            f, p = f[keep], p[keep] * np.where(f[keep] > 0, 2.0, 1.0)
+        yunit, offset = _psd_unit(unit)
+        p_db = 10 * np.log10(np.maximum(p, 1e-300)) + offset
+        p_db = np.maximum(p_db, p_db.max() - 120)
+        return {"type": "line", "x": _f(f, 1) if sig.fs else _f(f), "series": {"PSD": _f(p_db, 2)},
+                "xlabel": "Frequency" if sig.fs else "Normalized frequency", "xunit": "Hz" if sig.fs else "",
+                "ylabel": "PSD", "yunit": yunit}
 
     if view == "time":
         d = np.asarray(sig.data).reshape(-1, sig.data.shape[-1])[0, :300]
-        x = np.arange(d.size)
         if np.iscomplexobj(d):
             series = {"I": _f(d.real), "Q": _f(d.imag)}
         else:
             series = {"value": _f(d)}
-        return {"type": "line", "x": x.tolist(), "series": series, "xlabel": "Index", "ylabel": "Amplitude"}
+        if sig.fs:
+            x, xlabel, xunit = _f(np.arange(d.size) / sig.fs), "Time", "s"
+        else:
+            x, xlabel, xunit = list(range(d.size)), "Index", ""
+        return {"type": "line", "x": x, "series": series, "xlabel": xlabel, "xunit": xunit,
+                "ylabel": "Amplitude", "yunit": unit}
 
     if view == "eye":
         sps = int(sig.meta.get("sps") or 0)
@@ -84,21 +110,25 @@ def compute_view(sig: Signal, view: str, max_points: int = 2000) -> dict[str, An
             return {"type": "message", "text": "Eye diagram needs an oversampled waveform."}
         delay = int(round(sig.meta.get("delay", 0.0)))
         d = np.asarray(sig.data).reshape(-1, sig.data.shape[-1])[0]
-        traces = eye_traces(d, sps, max(delay - sps + 8 * sps, 0), 2, 80)
-        scale = np.max(np.abs(traces)) or 1.0
-        return {"type": "eye", "t": _f(np.arange(traces.shape[1]) / sps - 1.0),
-                "traces": [_f(t.real / scale, 3) for t in traces]}
+        traces = eye_traces(d, sps, max(delay - sps + 8 * sps, 0), 2, 120).real
+        t_ui = np.arange(traces.shape[1]) / sps - 1.0
+        out = {"type": "eye", "traces": [_f(t) for t in traces], "unit": unit}
+        if sig.fs:
+            out.update(t=_f(t_ui * sps / sig.fs), tunit="s", ui=sps / sig.fs)
+        else:
+            out.update(t=_f(t_ui), tunit="UI", ui=1.0)
+        return out
 
     if view == "histogram":
         d = _flat(sig, 20000)
         counts, edges = np.histogram(np.clip(d, -30, 30), bins=60)
         return {"type": "line", "x": _f((edges[:-1] + edges[1:]) / 2, 2), "series": {"count": counts.tolist()},
-                "xlabel": "LLR", "ylabel": "Count"}
+                "xlabel": "LLR", "xunit": "", "ylabel": "Count", "yunit": ""}
 
     if view == "grid":
         g = np.abs(np.asarray(sig.data)[0])
         return {"type": "heatmap", "z": _f(20 * np.log10(np.maximum(np.fft.fftshift(g, axes=-1), 1e-6)), 1),
-                "xlabel": "Subcarrier", "ylabel": "OFDM symbol"}
+                "xlabel": "Subcarrier", "ylabel": "OFDM symbol", "zunit": "dB"}
 
     if view == "csi":
         return _csi_view(sig)
@@ -117,12 +147,16 @@ def _csi_view(sig: Signal) -> dict[str, Any]:
         else:
             label = "Sample"
         h = h[:: max(1, h.size // 500)]
-        return {"type": "line", "x": list(range(h.size)), "series": {"|h| dB": _f(20 * np.log10(np.abs(h) + 1e-12), 2)},
-                "xlabel": label, "ylabel": "dB"}
+        return {"type": "line", "x": list(range(h.size)), "series": {"|h|": _f(20 * np.log10(np.abs(h) + 1e-12), 2)},
+                "xlabel": label, "xunit": "", "ylabel": "Gain", "yunit": "dB"}
     if ctype in ("cir", "cir_tv"):
         taps = d[0] if ctype == "cir" else d[0, :, 0]
-        return {"type": "line", "x": list(range(taps.size)), "series": {"|h[n]|": _f(np.abs(taps))},
-                "xlabel": "Delay [samples]", "ylabel": "Magnitude", "bars": True}
+        if sig.fs:
+            x, xunit = _f(np.arange(taps.size) / sig.fs), "s"
+        else:
+            x, xunit = list(range(taps.size)), "samples"
+        return {"type": "line", "x": x, "series": {"|h[n]|": _f(np.abs(taps))},
+                "xlabel": "Delay", "xunit": xunit, "ylabel": "Magnitude", "yunit": "", "bars": True}
     if ctype == "freq":
         H = np.fft.fftshift(d[0, 0])
         n = H.size
@@ -132,13 +166,17 @@ def _csi_view(sig: Signal) -> dict[str, Any]:
         if layout is not None:  # only the used subcarriers carry an estimate
             active = set(layout.active_freqs.tolist())
             values = [v if f in active else None for f, v in zip(freqs.tolist(), values)]
-        return {"type": "line", "x": freqs.tolist(), "series": {"|H(f)| dB": values},
-                "xlabel": "Subcarrier", "ylabel": "dB"}
+        x: list[float] = freqs.tolist()
+        xlabel, xunit = "Subcarrier", ""
+        if layout is not None and sig.fs:
+            x, xlabel, xunit = _f(freqs * sig.fs / n, 1), "Frequency", "Hz"
+        return {"type": "line", "x": x, "series": {"|H(f)|": values},
+                "xlabel": xlabel, "xunit": xunit, "ylabel": "Gain", "yunit": "dB"}
     if ctype == "mimo":
         H = d[0] if d.ndim == 3 else d[0, 0]
         mag = np.abs(H).reshape(-1)
         return {"type": "line", "x": list(range(mag.size)), "series": {"|H_ij|": _f(mag)},
-                "xlabel": "Entry (row-major)", "ylabel": "Magnitude", "bars": True}
+                "xlabel": "Entry (row-major)", "xunit": "", "ylabel": "Magnitude", "yunit": "", "bars": True}
     return {"type": "message", "text": f"Unsupported CSI type '{ctype}'."}
 
 

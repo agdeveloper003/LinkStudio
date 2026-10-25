@@ -64,6 +64,11 @@ def test_multipath_preset_and_static_taps():
     g.chain("src", "map", "ch")
     caps = _capture(g, batch=500)
     cir = caps["ch.csi"].data
+    # Last tap at 77.1 samples: band-limited kernel spanning 8 samples on each side.
+    assert cir.shape[1] == int(np.floor(2510e-9 * 30.72e6)) + 9
+    assert np.isclose(np.mean(np.sum(np.abs(cir) ** 2, axis=1)), 1.0, rtol=0.1)
+    g.set_param("ch.fractional_delays", False)
+    cir = _capture(g, batch=500)["ch.csi"].data
     assert cir.shape[1] == int(round(2510e-9 * 30.72e6)) + 1
     assert np.isclose(np.mean(np.sum(np.abs(cir) ** 2, axis=1)), 1.0, rtol=0.1)
 
@@ -121,3 +126,46 @@ def test_fractional_timing_offset():
     g = _symbols_graph(("timing_offset", {"delay_samples": 3.0}))
     caps = _capture(g, batch=2)
     assert np.allclose(caps["b0.out"].data[:, 3:], caps["map.out"].data[:, :-3])
+
+
+# ------------------------------------------------- fading generator and TDL profiles
+def test_zheng_xiao_generator_matches_clarke():
+    from scipy.special import j0
+    from linkstudio.phy.channel.fading import sum_of_sinusoids
+    fd = 0.01
+    h = sum_of_sinusoids(np.random.default_rng(1), 2000, 600, fd, 8)
+    lags = np.arange(0, 200, 20)
+    acf = np.array([np.mean(h[:, k:] * np.conj(h[:, :h.shape[1] - k])).real for k in lags])
+    assert np.mean(np.abs(h) ** 2) == pytest.approx(1.0, rel=0.02)
+    assert np.allclose(acf, j0(2 * np.pi * fd * lags), atol=0.02)
+    cross = [np.mean(h[:, k:].real * h[:, :h.shape[1] - k].imag) for k in lags]
+    assert np.max(np.abs(cross)) < 0.02  # in-phase and quadrature uncorrelated
+
+
+@pytest.mark.parametrize("preset", ["TDL-A", "TDL-B", "TDL-C", "TDL-D", "TDL-E"])
+def test_nr_tdl_profiles_scale_to_the_delay_spread(preset):
+    blk = cs.create_block("multipath", preset=preset, delay_spread_ns=300.0, fractional_delays=False)
+    fs = 1e12  # fine grid: rounding is negligible
+    d, p, _ = blk.tap_profile(fs)
+    mean = np.sum(p * d) / fs
+    rms = np.sqrt(np.sum(p * (d / fs) ** 2) - mean ** 2)
+    assert rms == pytest.approx(300e-9, rel=0.01)
+
+
+def test_tdl_d_first_tap_is_ricean_with_the_standard_k_factor():
+    g = _symbols_graph(("multipath", {"preset": "TDL-D", "delay_spread_ns": 1000.0, "fractional_delays": False}))
+    g.set_param("map.symbol_rate", 30.72e6)
+    h0 = _capture(g, batch=4000)["b0.csi"].data[:, 0]
+    pw = np.abs(h0) ** 2
+    gamma = np.var(pw) / np.mean(pw) ** 2  # = (1 + 2K) / (1 + K)^2 for a Ricean amplitude
+    k = np.sqrt(1 - gamma) / (1 - np.sqrt(1 - gamma))
+    assert 10 * np.log10(k) == pytest.approx(13.3, abs=1.0)
+
+
+def test_fractional_delay_kernel_is_band_limited_delay():
+    from linkstudio.phy.channel.fading import delay_kernel
+    first, taps = delay_kernel(5.3)
+    w = np.linspace(0, 0.75 * np.pi, 40)
+    resp = np.array([np.sum(taps * np.exp(-1j * x * (first + np.arange(taps.size)))) for x in w])
+    assert np.max(np.abs(resp - np.exp(-1j * w * 5.3))) < 0.05
+    assert delay_kernel(4.0) == (4, pytest.approx(np.ones(1)))

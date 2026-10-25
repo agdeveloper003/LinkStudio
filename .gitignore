@@ -25,3 +25,6 @@ manual/*.synctex.gz
 Thumbs.db
 .vscode/
 .idea/
+
+# Reference PDFs are downloaded locally, not redistributed (see references/README.md)
+references/**/*.pdf

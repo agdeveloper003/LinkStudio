@@ -1,0 +1,26 @@
+name: Free-space optical link budget
+category: Optical
+description: 1 Gb/s OOK at 1550 nm over 1 km of free space with every loss of ITU-R P.1814 -
+  haze attenuation from the visibility (Kim model), beam spreading for 2 mrad divergence onto
+  an 8 cm aperture, gamma-gamma scintillation from Cn^2 and pointing jitter. Lower
+  fso.visibility_km to 1 (light fog) or raise fso.cn2 to 1e-13 to see the link fail.
+seed: 1
+batch_size: 64
+blocks:
+  src: {type: random_bits, params: {n_bits: 1000}}
+  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 1000000000.0}}
+  tx: {type: intensity_modulator, params: {power_dbm: 10.0, extinction_ratio_db: 15.0}}
+  fso: {type: fso_channel, params: {distance_m: 1000.0, visibility_km: 5.0, divergence_mrad: 2.0,
+    rx_aperture_m: 0.08, cn2: 1.0e-14, turbulence: gamma_gamma, pointing_jitter_m: 0.2}}
+  opm: {type: optical_power_meter}
+  pd: {type: photodiode, params: {thermal_noise_pa_rthz: 10.0}}
+  agc: {type: agc}
+  dec: {type: line_decoder}
+  ber: {type: ber_meter}
+chain: [src, lc, tx, fso, pd, agc, dec, ber.rx]
+edges:
+  - fso.out -> opm.in
+  - src.out -> ber.tx
+probes:
+  - {key: fso.csi, view: csi}
+  - {key: agc.out, view: constellation}

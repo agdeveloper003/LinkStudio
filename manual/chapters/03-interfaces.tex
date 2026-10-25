@@ -10,7 +10,7 @@
   \draw[black!40,fill=black!3,rounded corners=2pt] (0,0) rectangle (14,8.2);
   % top bar
   \draw[accent,fill=soft] (0.1,7.5) rectangle (13.9,8.1);
-  \node[anchor=west] at (0.2,7.8) {\textbf{scenario name} \quad New \quad Save \quad Save as \quad Undo/Redo \quad Layout \quad Export .py \quad batch \quad seed};
+  \node[anchor=west] at (0.2,7.8) {\textbf{scenario name} \quad New \quad Save \quad Save as \quad Undo/Redo \quad Layout \quad Export .py \quad seed};
   \node[anchor=east,accent3] at (13.8,7.8) {\textbf{valid}};
   % palette
   \draw[accent4,fill=accent4!6] (0.1,2.9) rectangle (2.6,7.4);
@@ -44,11 +44,25 @@ modes.}
 \paragraph{Editing.}
 \begin{itemize}
   \item \textbf{Adding blocks:} drag a block from the palette or double-click it.
-  \item \textbf{Connecting:} drag from an output handle (right side) to an input handle (left
-  side). Handle colours are the signal kinds of \cref{tab:kinds}; incompatible connections are
-  refused, and dashed handles are optional inputs.
+  \item \textbf{Connecting:} drag from an output handle to an input handle (by default outputs
+  are on the right and inputs on the left). Handle colours are the signal kinds of
+  \cref{tab:kinds}; incompatible connections are refused, and dashed handles are optional inputs.
+  \item \textbf{Moving ports:} Ctrl + drag a handle to move it anywhere on the block border (any
+  side), so that feedback paths and chains drawn right to left stay readable. Port places are
+  saved in the scenario (\code{port_layout}).
+  \item \textbf{Alignment:} while a block is dragged it snaps so that its connected ports line
+  up with the ports at the other end (straight links), or else so that its edges or centre line
+  up with a neighbouring block; a guide line shows the alignment. The automatic layout also
+  straightens single-input links.
+  \item \textbf{Links} are drawn with orthogonal segments routed around the blocks
+  (A$^\ast$ search on a sparse grid of block edges and channels, with a penalty per bend), so they
+  never pass behind a block.
   \item \textbf{Inspector:} parameter forms are generated from each block's schema. Bounded and
-  dB-valued parameters get sliders, and \code{auto} leaves a value to upstream metadata.
+  dB-valued parameters get sliders, and \code{auto} leaves a value to upstream metadata. For
+  linear blocks the inspector also plots the \emph{frequency response} (magnitude, phase or group
+  delay): the model transfer function of cables, CTLE, lasers and VCSELs, photodiodes, single-
+  and multimode fibers and pulse shapers, and an estimate $\hat H=S_{xy}/S_{xx}$ of one
+  realization for random multipath channels.
   \item \textbf{Shortcuts:} Ctrl+Z/Y (undo/redo), Ctrl+C/V/D (copy, paste, duplicate, with
   internal edges), Ctrl+L (automatic layout), Ctrl+S (save), Ctrl+O (scenario browser).
 \end{itemize}
@@ -57,14 +71,17 @@ next to them.
 
 \paragraph{Modes.}
 \begin{description}[font=\sffamily\bfseries]
-  \item[Live] runs the chain continuously at 1--30 batches per second and streams every probe.
-  Parameter changes are applied between batches and the meters restart, so the effect of a
-  slider is visible immediately. Structural edits restart the session.
+  \item[Live] simulates one frame per step (batch size 1), 1--30 steps per second, and streams
+  every probe; the metrics accumulate across steps. Parameter changes are applied between steps
+  and the meters restart, so the effect of a slider is visible immediately. Structural edits
+  restart the session. The rate only sets how often the scopes refresh, not the results.
   \item[Simulate] runs a Monte-Carlo job in the background, either for a fixed number of
-  batches or until a metric reaches a threshold. It shows the final metrics (BER with its 95\,\%
-  confidence interval) and the probes of the last batch.
+  batches or until a metric reaches a threshold. \emph{frames/batch} sets the batch size (saved in
+  the scenario) and \emph{cores} the number of worker processes (\cref{sec:parallel}). It shows the
+  final metrics (BER with its 95\,\% confidence interval) and the probes of the last batch.
   \item[Sweep] runs one or two nested parameter sweeps and plots any metric, with an optional
-  theoretical curve. Curves can be kept and overlaid, and the results exported as CSV or PNG.
+  theoretical curve; with several cores the points run in parallel. Curves can be kept and
+  overlaid, and the results exported as CSV or PNG.
 \end{description}
 
 \paragraph{Probes and views.}
@@ -84,6 +101,13 @@ Kind & Views\\
 \bottomrule
 \end{tabular}
 \end{center}
+Axes carry physical units. The server sends values in base SI units together with their unit,
+taken from the \meta{unit} metadata: $\sqrt{\mathrm{W}}$ for optical fields, A
+for photocurrents, none for normalized baseband signals. The editor picks the SI prefix
+(ps, GHz, mA, \dots) so that tick labels stay short. Spectra are absolute power spectral
+densities (dBm/Hz for optical fields, one-sided for real signals). The eye diagram shows time
+in seconds over two unit intervals and its vertical axis is centred on the mean of the traces
+and spans all of them.
 
 \section{The HTTP and WebSocket API}
 The editor talks to the FastAPI application in \file{linkstudio/api/app.py}. Everything it does
@@ -94,12 +118,14 @@ can also be scripted.
 \toprule
 Method & Path & Purpose\\
 \midrule
+GET  & \code{/api/health} & server version and number of CPU cores\\
 GET  & \code{/api/blocks} & block catalogue: documentation, ports, parameter JSON Schema\\
 GET  & \code{/api/scenarios} & scenario list with name, category, description, block count\\
 GET/PUT & \code{/api/scenarios/{path}} & load / save a scenario in editor format\\
 POST & \code{/api/validate} & validate an editor graph; returns errors and port kinds\\
 POST & \code{/api/layout} & automatic layout of the blocks\\
 POST & \code{/api/export/python} & standalone Python script equivalent to the graph\\
+POST & \code{/api/response} & frequency response of one block (magnitude, phase, group delay)\\
 POST & \code{/api/jobs} & start a simulate or sweep job\\
 GET  & \code{/api/jobs/{id}} & job status, progress, partial and final results\\
 POST & \code{/api/jobs/{id}/cancel} & cancel a job\\
@@ -108,7 +134,9 @@ WS   & \code{/api/live} & interactive live mode\\
 \end{tabularx}
 \end{center}
 
-Jobs run in a thread pool (\file{api/jobs.py}). Their results contain JSON-safe metrics (NaN
+Jobs run in a thread pool (\file{api/jobs.py}); the \code{workers} entry of the job
+configuration sends the batches or sweep points to that many worker processes. Their results
+contain JSON-safe metrics (NaN
 becomes \code{null}), the probe data of the last batch and, for sweeps of a single parameter
 whose value matches a known modulation, theoretical BER curves. A failed job reports the
 message \code{failed} with the details in a separate \code{detail} field.

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { EditorGraph } from "../api";
 import { SERIES_COLORS } from "../theme";
 import { useJob } from "../useJob";
-import { DEFAULT_STOP, ProgressBar, StopRuleEditor, fmt, stopConfig, type StopRule } from "./common";
+import { DEFAULT_STOP, ProgressBar, ResourceFields, StopRuleEditor, fmt, stopConfig, type Resources, type StopRule } from "./common";
 import { LinePlot, type LineSeries } from "./plots/LinePlot";
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   theory: Record<string, string>;
   scenarioName: string;
   blocked?: string;
+  resources: Resources;
 }
 
 interface KeptCurve {
@@ -48,7 +49,7 @@ function alignCurves(curves: KeptCurve[]): { x: number[]; ys: (number | null)[][
   return { x, ys };
 }
 
-export function SweepPanel({ getGraph, numericParams, theory, scenarioName, blocked }: Props) {
+export function SweepPanel({ getGraph, numericParams, theory, scenarioName, blocked, resources }: Props) {
   const [rows, setRows] = useState<Row[]>([{ path: "", values: "0:2:10" }]);
   const [rule, setRule] = useState<StopRule>({ ...DEFAULT_STOP, mode: "metric" });
   const [metric, setMetric] = useState("");
@@ -128,7 +129,7 @@ export function SweepPanel({ getGraph, numericParams, theory, scenarioName, bloc
   const start = () => {
     const params: Record<string, number[]> = {};
     for (const r of effRows) if (r.path) params[r.path] = parseValues(r.values);
-    run("sweep", getGraph(), { params, theory: theoryKey || undefined, ...stopConfig(rule) });
+    run("sweep", getGraph(), { params, theory: theoryKey || undefined, ...stopConfig(rule), workers: resources.workers });
   };
 
   const downloadCsv = () => {
@@ -153,6 +154,7 @@ export function SweepPanel({ getGraph, numericParams, theory, scenarioName, bloc
         )}
         {blocked && <span className="field-error blocked">{blocked}</span>}
         <StopRuleEditor rule={rule} onChange={setRule} />
+        <ResourceFields res={resources} />
         {job && <ProgressBar value={job.progress} status={job.status} />}
         {job && <span className="muted small">{job.status} · {job.message} · {fmt(job.elapsed_s)} s</span>}
         {(error || job?.error) && <span className="field-error">{error ?? job?.error}</span>}

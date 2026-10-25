@@ -111,6 +111,32 @@ export function StopRuleEditor({ rule, onChange }: { rule: StopRule; onChange: (
   );
 }
 
+/** Monte-Carlo resources: frames per batch (stored in the scenario) and CPU cores. */
+export interface Resources {
+  batch: number;
+  workers: number;
+  maxWorkers: number;
+  setBatch: (n: number) => void;
+  setWorkers: (n: number) => void;
+}
+
+export function ResourceFields({ res }: { res: Resources }) {
+  return (
+    <div className="stop-rule">
+      <label title="Independent frames simulated together in every batch (vectorized). Stored in the scenario.">
+        frames/batch
+        <input type="number" min={1} value={res.batch} onChange={(e) => res.setBatch(Math.max(1, Math.round(Number(e.target.value))))} />
+      </label>
+      <label title={`Worker processes (CPU cores, up to ${res.maxWorkers}). Batches or sweep points run in parallel.`}>
+        cores
+        <input type="number" min={1} max={res.maxWorkers} value={res.workers}
+               onChange={(e) => res.setWorkers(Math.min(res.maxWorkers, Math.max(1, Math.round(Number(e.target.value)))))} />
+        <span className="muted small">/ {res.maxWorkers}</span>
+      </label>
+    </div>
+  );
+}
+
 export function ProgressBar({ value, status }: { value: number; status?: string }) {
   return (
     <div className={`progress ${status ?? ""}`}>

@@ -1,0 +1,21 @@
+name: Urban micro-cell link budget
+category: Wireless
+description: QPSK at 10 Msym/s, 3.5 GHz, 23 dBm transmit power, over the 3GPP TR 38.901 UMi
+  street-canyon path loss (LOS drawn with the standard probability, log-normal shadowing per
+  frame) into a receiver with 7 dB noise figure (thermal noise k T F B). Sweep pl.distance_m
+  from 20 to 1000 m and watch path_loss_db, los_fraction and the frame error rate.
+seed: 1
+batch_size: 64
+blocks:
+  src: {type: random_bits, params: {n_bits: 1000}}
+  map: {type: mapper, params: {scheme: psk, order: 4, symbol_rate: 10000000.0}}
+  tx: {type: gain, params: {gain_db: -7.0}}
+  pl: {type: path_loss, params: {model: umi, frequency_ghz: 3.5, distance_m: 100.0}}
+  awgn: {type: awgn, params: {mode: thermal, noise_figure_db: 7.0}}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter}
+chain: [src, map, tx, pl, awgn, demap, ber.rx]
+edges:
+  - src.out -> ber.tx
+probes:
+  - {key: awgn.out, view: constellation}

@@ -4,6 +4,7 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  ViewportPortal,
   applyEdgeChanges,
   applyNodeChanges,
   useReactFlow,
@@ -13,15 +14,16 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { api, downloadText, type Catalogue, type Probe, type ScenarioItem, type Validation } from "./api";
+import { api, downloadText, type Catalogue, type PortPlace, type Probe, type ScenarioItem, type Validation } from "./api";
 import { BlockNode } from "./components/BlockNode";
 import { Inspector } from "./components/Inspector";
 import { LivePanel } from "./components/LivePanel";
 import { DRAG_MIME, Palette } from "./components/Palette";
+import { ObstacleContext, RoutedEdge } from "./components/RoutedEdge";
 import { ScenarioBrowser } from "./components/ScenarioBrowser";
 import { SimulatePanel } from "./components/SimulatePanel";
 import { SweepPanel } from "./components/SweepPanel";
-import { CatalogueContext } from "./context";
+import { CatalogueContext, PortMoveContext } from "./context";
 import {
   applyValidation,
   defaultParams,
@@ -33,10 +35,12 @@ import {
   uniqueName,
   type BlockNodeType,
 } from "./graph";
+import { nodeRect, snapPosition, straighten, type Guide } from "./snap";
 import { kindColor, kindsCompatible } from "./theme";
 import { useLive } from "./useLive";
 
 const nodeTypes = { block: BlockNode };
+const edgeTypes = { routed: RoutedEdge };
 const DEFAULT_SCENARIO = "wireless/single_carrier_16qam.yaml";
 const HISTORY_LIMIT = 100;
 type Mode = "live" | "simulate" | "sweep";
@@ -78,6 +82,15 @@ export default function App() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
+  const [guides, setGuides] = useState<Guide[]>([]);
+  const [maxWorkers, setMaxWorkers] = useState(1);
+  const [workers, setWorkersState] = useState(() => {
+    try {
+      return Number(window.localStorage.getItem("linkstudio.workers")) || 0;
+    } catch {
+      return 0;
+    }
+  });
   const flow = useReactFlow();
   const live = useLive();
   const dragging = useRef(false);
@@ -132,7 +145,9 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [cat, list] = await Promise.all([api.catalogue(), api.scenarios()]);
+        const [cat, list, health] = await Promise.all([api.catalogue(), api.scenarios(), api.health()]);
+        setMaxWorkers(health.cpu_count);
+        setWorkersState((w) => Math.min(w || Math.max(1, health.cpu_count - 1), health.cpu_count));
         setCatalogue(cat);
         setScenarios(list);
         const first = list.find((s) => s.path === DEFAULT_SCENARIO) ?? list.find((s) => !s.subsystem);
@@ -222,10 +237,52 @@ export default function App() {
   };
 
   // -------------------------------------------------------- graph editing
+  const snapped = useRef<{ id: string; pos: { x: number; y: number } } | null>(null);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+
   const onNodesChange = useCallback((changes: NodeChange<BlockNodeType>[]) => {
+    // A single block being dragged snaps to its connected ports and to neighbouring blocks.
+    const drags = changes.filter((c) => c.type === "position" && c.dragging && c.position);
+    if (drags.length === 1 && drags[0].type === "position" && drags[0].position) {
+      const c = drags[0];
+      const node = nodesRef.current.find((n) => n.id === c.id);
+      if (node) {
+        const snap = snapPosition(node, c.position!, nodesRef.current, edgesRef.current);
+        c.position = snap.pos;
+        snapped.current = { id: c.id, pos: snap.pos };
+        setGuides(snap.guides);
+      }
+    } else if (changes.some((c) => c.type === "position" && !c.dragging)) {
+      // The drag-end change carries the unsnapped position: keep the snapped one.
+      for (const c of changes) {
+        if (c.type === "position" && !c.dragging && c.position && snapped.current?.id === c.id) c.position = snapped.current.pos;
+      }
+      snapped.current = null;
+      setGuides([]);
+    }
     setNodes((nds) => applyNodeChanges(changes, nds));
     for (const c of changes) if (c.type === "remove") setProbes((ps) => ps.filter((p) => !p.key.startsWith(`${c.id}.`)));
   }, []);
+
+  const movePort = useCallback((node: string, key: string, place: PortPlace) => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id !== node) return n;
+        const old = n.data.ports?.[key];
+        if (old && old.side === place.side && old.offset === place.offset) return n;
+        return { ...n, data: { ...n.data, ports: { ...n.data.ports, [key]: place } } };
+      }),
+    );
+  }, []);
+
+  const obstacles = useMemo(
+    () => nodes.map((n) => nodeRect(n)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [positionsKey, structureKey, JSON.stringify(nodes.map((n) => n.data.ports ?? null))],
+  );
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
@@ -429,7 +486,7 @@ export default function App() {
     if (!nodes.length) return;
     try {
       const { positions } = await api.layout(getGraph());
-      setNodes((nds) => nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n)));
+      setNodes((nds) => straighten(nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n)), edges));
       window.setTimeout(() => flow.fitView({ padding: 0.15, duration: 300 }), 50);
     } catch (err) {
       notify(`Layout failed: ${err instanceof Error ? err.message : err}`, true);
@@ -523,10 +580,25 @@ export default function App() {
     () =>
       edges.map((e) => {
         const color = kindColor(outputKinds(e.source, e.sourceHandle ?? ""));
-        return { ...e, style: { stroke: color, strokeWidth: e.selected ? 3 : 2 }, animated: live.running };
+        return { ...e, type: "routed", style: { stroke: color, strokeWidth: e.selected ? 3 : 2 }, animated: live.running };
       }),
     [edges, outputKinds, live.running],
   );
+
+  const resources = {
+    batch: meta.batch_size,
+    workers: Math.max(1, workers),
+    maxWorkers,
+    setBatch: (n: number) => setMeta((m) => ({ ...m, batch_size: n })),
+    setWorkers: (n: number) => {
+      setWorkersState(n);
+      try {
+        window.localStorage.setItem("linkstudio.workers", String(n));
+      } catch {
+        /* private mode: not remembered */
+      }
+    },
+  };
 
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
   const blocked = !nodes.length
@@ -542,6 +614,8 @@ export default function App() {
 
   return (
     <CatalogueContext.Provider value={catalogue}>
+    <PortMoveContext.Provider value={movePort}>
+    <ObstacleContext.Provider value={obstacles}>
       <div className="app" style={{ gridTemplateRows: `48px 1fr ${bottomHeight}px` }}>
         <header className="topbar">
           <div className="brand">
@@ -565,10 +639,6 @@ export default function App() {
           </div>
           <div className="spacer" />
           <label className="inline">
-            batch
-            <input type="number" min={1} value={meta.batch_size} onChange={(e) => setMeta({ ...meta, batch_size: Math.max(1, Number(e.target.value)) })} />
-          </label>
-          <label className="inline">
             seed
             <input type="number" value={meta.seed} onChange={(e) => setMeta({ ...meta, seed: Number(e.target.value) })} />
           </label>
@@ -587,6 +657,7 @@ export default function App() {
               nodes={nodes}
               edges={styledEdges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
@@ -598,8 +669,18 @@ export default function App() {
               fitView
               minZoom={0.2}
               proOptions={{ hideAttribution: true }}
-              defaultEdgeOptions={{ type: "smoothstep" }}
+              defaultEdgeOptions={{ type: "routed" }}
+              onNodeDragStop={() => setGuides([])}
             >
+              <ViewportPortal>
+                {guides.map((g, k) => (
+                  <div
+                    key={k}
+                    className="align-guide"
+                    style={{ left: g.x1, top: g.y1, width: Math.max(g.x2 - g.x1, 1), height: Math.max(g.y2 - g.y1, 1) }}
+                  />
+                ))}
+              </ViewportPortal>
               <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#2a3040" />
               <Controls />
               <MiniMap pannable zoomable nodeColor="#2b3245" maskColor="rgba(10,12,18,0.6)" style={{ width: 150, height: 96 }} />
@@ -623,11 +704,13 @@ export default function App() {
             onDelete={deleteBlock}
             onDuplicate={(id) => duplicate([id])}
             onScenarioChange={(p) => setMeta({ ...meta, ...p })}
+            getGraph={getGraph}
+            structureKey={structureKey}
           />
         </div>
 
         <section className="dock">
-          <div className="resize-handle" onMouseDown={() => (dragging.current = true)} />
+          <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); dragging.current = true; }} />
           <div className="tabs">
             {(["live", "simulate", "sweep"] as Mode[]).map((m) => (
               <button key={m} className={`tab${mode === m ? " active" : ""}`} onClick={() => setMode(m)}>
@@ -640,10 +723,10 @@ export default function App() {
             <LivePanel live={live} probes={probes} onStart={() => live.start(getGraph())} onView={setProbeView} onRemoveProbe={removeProbe} blocked={blocked} />
           </div>
           <div className={`tab-body${mode === "simulate" ? "" : " hidden"}`}>
-            <SimulatePanel getGraph={getGraph} probes={probes} onView={setProbeView} onRemoveProbe={removeProbe} blocked={blocked} />
+            <SimulatePanel getGraph={getGraph} probes={probes} onView={setProbeView} onRemoveProbe={removeProbe} blocked={blocked} resources={resources} />
           </div>
           <div className={`tab-body${mode === "sweep" ? "" : " hidden"}`}>
-            <SweepPanel getGraph={getGraph} numericParams={sweepParams} theory={catalogue.theory} scenarioName={meta.name} blocked={blocked} />
+            <SweepPanel getGraph={getGraph} numericParams={sweepParams} theory={catalogue.theory} scenarioName={meta.name} blocked={blocked} resources={resources} />
           </div>
         </section>
         {browserOpen && (
@@ -657,6 +740,8 @@ export default function App() {
         )}
         {toast && <div className={`toast${toast.error ? " error" : ""}`}>{toast.text}</div>}
       </div>
+    </ObstacleContext.Provider>
+    </PortMoveContext.Provider>
     </CatalogueContext.Provider>
   );
 }

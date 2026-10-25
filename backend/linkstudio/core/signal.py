@@ -28,6 +28,8 @@ built-in PHY library:
 ``ofdm``             :class:`~linkstudio.phy.waveform.ofdm.OFDMLayout` of the waveform
 ``n_data_symbols``   number of data symbols carried by an OFDM frame
 ``csi_type``         form of channel state information: "gain", "cir" or "freq"
+``unit``             physical unit of the samples ("√W" optical field, "A" photocurrent);
+                     absent or None for normalized (dimensionless) signals
 """
 
 from __future__ import annotations

@@ -107,7 +107,17 @@ class Block:
         reproducible random stream.
         """
         self.rng = np.random.default_rng([seed, zlib.crc32(path.encode())])
-        self.on_reset()
+        self.__dict__["_recording"] = set()
+        try:
+            self.on_reset()
+        finally:
+            self.__dict__["_state_keys"] = tuple(sorted(self.__dict__.pop("_recording")))
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        recording = self.__dict__.get("_recording")
+        if recording is not None:
+            recording.add(name)
+        object.__setattr__(self, name, value)
 
     def on_reset(self) -> None:
         """Clear runtime state such as accumulators or filter memories."""
@@ -138,6 +148,47 @@ class Block:
     def metrics(self) -> dict[str, float]:
         """Accumulated measurements (metric blocks override this)."""
         return {}
+
+    #: The frequency response acts on a complex envelope (plot both signs of f).
+    two_sided_response: ClassVar[bool] = False
+    #: Without a model response, estimate H(f) from the simulated input and output
+    #: (meaningful for random linear channels; misleading for noise sources).
+    estimate_response: ClassVar[bool] = False
+
+    def frequency_response(self, f: np.ndarray, x: Signal) -> np.ndarray | None:
+        """Model transfer function H(f) at frequencies ``f`` (Hz), or None.
+
+        ``x`` is the signal at the block input (sample rate and metadata such as the
+        wavelength). Linear blocks override this so the UI can plot their response.
+        """
+        return None
+
+    # ---------------------------------------------------------- parallel runs
+    def export_state(self) -> dict[str, Any]:
+        """Accumulators set by :meth:`on_reset`, plus ``_last*`` attributes.
+
+        Parallel runs execute batches in worker processes and merge these states
+        into one block with :meth:`merge_state` before reading :meth:`metrics`.
+        """
+        keys = set(self.__dict__.get("_state_keys", ())) | {k for k in self.__dict__ if k.startswith("_last")}
+        return {k: self.__dict__[k] for k in keys if k in self.__dict__}
+
+    def merge_state(self, state: Mapping[str, Any]) -> None:
+        """Merge the state exported by another copy of this block.
+
+        Numbers add up and lists are concatenated (counters and per-frame logs);
+        ``_last*`` attributes and anything else take the incoming value.
+        """
+        for key, value in state.items():
+            current = self.__dict__.get(key)
+            if key.startswith("_last") or current is None:
+                object.__setattr__(self, key, value)
+            elif isinstance(current, bool) or not isinstance(current, (int, float, list)):
+                object.__setattr__(self, key, value)
+            elif isinstance(current, list):
+                object.__setattr__(self, key, current + list(value))
+            else:
+                object.__setattr__(self, key, current + value)
 
     # ---------------------------------------------------------- serialization
     def to_spec(self) -> dict[str, Any]:

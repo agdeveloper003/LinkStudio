@@ -1,8 +1,10 @@
-import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { memo } from "react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
+import { memo, useContext, useEffect } from "react";
+import type { InstancePort, PortPlace, Side } from "../api";
+import { PortMoveContext, useCatalogue } from "../context";
+import { blockSize, placeFromPoint, placePoint, portKey, portPlaces } from "../geometry";
 import type { BlockNodeType } from "../graph";
 import { CATEGORY_COLORS, kindColor } from "../theme";
-import { useCatalogue } from "../context";
 
 function summary(params: Record<string, unknown>, keys: string[]): string {
   return keys
@@ -45,64 +47,109 @@ const HEADLINE: Record<string, string[]> = {
   phase_recovery: ["method"],
 };
 
+const POSITION: Record<Side, Position> = { left: Position.Left, right: Position.Right, top: Position.Top, bottom: Position.Bottom };
+
+interface PortProps {
+  node: string;
+  dir: "in" | "out";
+  port: InstancePort;
+  place: PortPlace;
+  size: { w: number; h: number };
+  probed: boolean;
+}
+
+/** One handle on the block border with its label inside the block. Ctrl + drag moves it. */
+function PortHandle({ node, dir, port, place, size, probed }: PortProps) {
+  const movePort = useContext(PortMoveContext);
+  const pt = placePoint(place, size);
+  const key = portKey(dir, port.name);
+
+  const startMove = (e: React.MouseEvent) => {
+    if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = (e.currentTarget as HTMLElement).closest(".react-flow__node") as HTMLElement | null;
+    if (!el) return;
+    const move = (ev: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      const zoom = r.width / size.w || 1;
+      movePort(node, key, placeFromPoint({ x: (ev.clientX - r.left) / zoom, y: (ev.clientY - r.top) / zoom }, size));
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.classList.remove("moving-port");
+    };
+    document.body.classList.add("moving-port");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const optional = dir === "in" && port.required === false;
+  return (
+    <>
+      <Handle
+        type={dir === "in" ? "target" : "source"}
+        position={POSITION[place.side]}
+        id={port.name}
+        className="handle"
+        style={{
+          left: pt.x,
+          top: pt.y,
+          right: "auto",
+          bottom: "auto",
+          background: kindColor(port.kinds),
+          borderStyle: optional ? "dashed" : "solid",
+        }}
+        title={`${port.name}: ${port.kinds}${optional ? " (optional)" : ""} - Ctrl + drag to move`}
+        onMouseDownCapture={startMove}
+      />
+      <span className={`port-label side-${place.side}${optional ? " optional" : ""}`} style={{ left: pt.x, top: pt.y }}>
+        {probed && <span className="probe-dot" title="probed">●</span>}
+        {port.name}
+      </span>
+    </>
+  );
+}
+
 function BlockNodeImpl({ id, data, selected }: NodeProps<BlockNodeType>) {
   const catalogue = useCatalogue();
+  const updateInternals = useUpdateNodeInternals();
   const info = catalogue?.blocks[data.type];
   const category = data.type === "subsystem" ? "core" : info?.category ?? "core";
   const color = CATEGORY_COLORS[category] ?? "#94a3b8";
-  const rows = Math.max(data.inputs.length, data.outputs.length);
   const headline = summary(data.params, HEADLINE[data.type] ?? Object.keys(data.params).slice(0, 2));
+  const places = portPlaces(data);
+  const size = blockSize(data, places);
+  const placesKey = JSON.stringify(places);
+
+  // Handles moved without a size change: React Flow must re-measure them for the links.
+  useEffect(() => updateInternals(id), [id, placesKey, updateInternals]);
 
   return (
-    <div className={`block-node${selected ? " selected" : ""}${data.error ? " error" : ""}`}>
+    <div
+      className={`block-node${selected ? " selected" : ""}${data.error ? " error" : ""}`}
+      style={{ width: size.w, height: size.h }}
+    >
       <div className="block-node-header" style={{ borderTopColor: color }}>
         <span className="block-node-name">{id}</span>
         <span className="block-node-type" style={{ color }}>{data.type}</span>
       </div>
-      {headline && <div className="block-node-summary">{headline}</div>}
-      <div className="block-node-ports">
-        {Array.from({ length: rows }).map((_, i) => {
-          const inp = data.inputs[i];
-          const out = data.outputs[i];
-          return (
-            <div className="port-row" key={i}>
-              <div className="port port-in">
-                {inp && (
-                  <>
-                    <Handle
-                      type="target"
-                      position={Position.Left}
-                      id={inp.name}
-                      className="handle"
-                      style={{ background: kindColor(inp.kinds), borderStyle: inp.required === false ? "dashed" : "solid" }}
-                      title={`${inp.name}: ${inp.kinds}${inp.required === false ? " (optional)" : ""}`}
-                    />
-                    <span className={inp.required === false ? "optional" : ""}>{inp.name}</span>
-                  </>
-                )}
-              </div>
-              <div className="port port-out">
-                {out && (
-                  <>
-                    <span>
-                      {data.probed.includes(out.name) && <span className="probe-dot" title="probed">●</span>}
-                      {out.name}
-                    </span>
-                    <Handle
-                      type="source"
-                      position={Position.Right}
-                      id={out.name}
-                      className="handle"
-                      style={{ background: kindColor(out.kinds) }}
-                      title={`${out.name}: ${out.kinds}`}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <div className="block-node-summary">{headline}</div>
+      {data.inputs.map((p) => (
+        <PortHandle key={`in:${p.name}`} node={id} dir="in" port={p} place={places[portKey("in", p.name)]} size={size} probed={false} />
+      ))}
+      {data.outputs.map((p) => (
+        <PortHandle
+          key={`out:${p.name}`}
+          node={id}
+          dir="out"
+          port={p}
+          place={places[portKey("out", p.name)]}
+          size={size}
+          probed={data.probed.includes(p.name)}
+        />
+      ))}
     </div>
   );
 }

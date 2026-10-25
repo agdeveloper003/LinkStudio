@@ -99,7 +99,7 @@ class Sweep:
 
     def run(self, progress: bool = False,
             on_point: Callable[[int, int, dict[str, Any]], None] | None = None,
-            should_stop: Callable[[], bool] | None = None) -> SweepResult:
+            should_stop: Callable[[], bool] | None = None, workers: int = 1) -> SweepResult:
         """Run every point.
 
         Args:
@@ -107,11 +107,35 @@ class Sweep:
             on_point: Called with ``(index, total, record)`` after every point.
             should_stop: Polled after every batch; returning ``True`` cancels the sweep
                 (records collected so far are returned).
+            workers: Worker processes; above 1, points are simulated in parallel. Every
+                point is still a serial run, so the records are identical to ``workers=1``.
         """
         originals = {k: self.graph.get_param(k) for k in self.params}
         records: list[dict[str, Any]] = []
         points = self.points()
         keep_going = (lambda n, m: not should_stop()) if should_stop else None
+
+        def record_point(i: int, metrics: dict[str, Any], n_batches: int, elapsed_s: float) -> None:
+            point = points[i]
+            if self.metrics is not None:
+                metrics = {k: metrics[k] for k in self.metrics}
+            record = {**point, **metrics, "n_batches": n_batches, "elapsed_s": round(elapsed_s, 3)}
+            records.append(record)
+            if on_point is not None:
+                on_point(i, len(points), record)
+            if progress:
+                ptxt = ", ".join(f"{k}={v}" for k, v in point.items())
+                mtxt = ", ".join(f"{k}={_fmt(v)}" for k, v in list(metrics.items())[:3])
+                print(f"  [{i + 1}] {ptxt} -> {mtxt}")
+
+        if workers > 1 and len(points) > 1:
+            from linkstudio.core.parallel import run_points
+
+            seeds = [self.seed if self.same_seed else self.seed + i for i in range(len(points))]
+            run_points(self.graph, points, self.batch_size, seeds, self.n_batches, self.stop,
+                       min(workers, len(points)),
+                       lambda i, r: record_point(i, r["metrics"], r["n_batches"], r["elapsed_s"]), should_stop)
+            return SweepResult(records, list(self.params))
         try:
             for i, point in enumerate(points):
                 if should_stop is not None and should_stop():
@@ -122,15 +146,7 @@ class Sweep:
                 res = sim.run(n_batches=self.n_batches, stop=self.stop, on_batch=keep_going)
                 if res.stop_reason == "cancelled":
                     break
-                metrics = res.metrics if self.metrics is None else {k: res.metrics[k] for k in self.metrics}
-                record = {**point, **metrics, "n_batches": res.n_batches, "elapsed_s": round(res.elapsed_s, 3)}
-                records.append(record)
-                if on_point is not None:
-                    on_point(i, len(points), record)
-                if progress:
-                    ptxt = ", ".join(f"{k}={v}" for k, v in point.items())
-                    mtxt = ", ".join(f"{k}={_fmt(v)}" for k, v in list(metrics.items())[:3])
-                    print(f"  [{i + 1}] {ptxt} -> {mtxt}")
+                record_point(i, res.metrics, res.n_batches, res.elapsed_s)
         finally:
             for key, value in originals.items():
                 self.graph.set_param(key, value)

@@ -19,6 +19,8 @@ class AWGN(Block):
     * ``snr``  - per-sample SNR: N0 = P / SNR
     * ``esn0`` - energy per symbol over N0: N0 = P * sps / (Es/N0)
     * ``ebn0`` - energy per information bit: N0 = P * sps / (Eb/N0 * k * R * Ns)
+    * ``thermal`` - absolute receiver noise: N0 = k_B T F (W/Hz) over the sampled bandwidth,
+      noise variance N0 fs per complex sample; the signal must be in watts (link budgets).
 
     (Ns = ``spatial_rate`` metadata: streams per channel use with spatial multiplexing.)
 
@@ -32,18 +34,24 @@ class AWGN(Block):
 
     class Params(BlockParams):
         snr_db: float = Field(10.0, description="SNR value in dB (meaning set by 'mode').")
-        mode: Literal["snr", "esn0", "ebn0"] = Field("ebn0", description="SNR definition.")
+        mode: Literal["snr", "esn0", "ebn0", "thermal"] = Field("ebn0", description="SNR definition.")
         power_reference: Literal["nominal", "measured"] = Field(
             "nominal", description="Use the nominal power from metadata or measure it.")
         signal_power: float | None = Field(None, gt=0, description="Explicit reference power.")
         bits_per_symbol: int | None = Field(None, ge=1, description="Override metadata.")
         code_rate: float | None = Field(None, gt=0, le=1, description="Override metadata.")
+        noise_figure_db: float = Field(5.0, ge=0, description="Receiver noise figure (thermal mode).")
+        temperature_k: float = Field(290.0, gt=0, description="Reference temperature (thermal mode).")
 
     inputs = {"in": Port(Kind.SYMBOLS | Kind.SAMPLES)}
     outputs = {"out": Port.like("in")}
 
     def noise_variance(self, x: Signal) -> float:
         p = self.params
+        if p.mode == "thermal":
+            if not x.fs:
+                raise BlockError("Thermal noise needs the sample rate (fs) of the signal.")
+            return 1.380649e-23 * p.temperature_k * 10 ** (p.noise_figure_db / 10) * x.fs
         if p.signal_power is not None:
             power = p.signal_power
         elif p.power_reference == "nominal" and x.meta.get("power") is not None:

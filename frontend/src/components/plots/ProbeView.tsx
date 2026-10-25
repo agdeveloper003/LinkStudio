@@ -39,13 +39,15 @@ function render(data: ProbeResult | undefined, color: string) {
   if (!data) return <div className="scope-empty">Waiting for data…</div>;
   switch (data.type) {
     case "scatter":
-      return <Constellation i={data.i} q={data.q} refI={data.ref_i} refQ={data.ref_q} color={color} />;
+      return <Constellation i={data.i} q={data.q} unit={data.unit} refI={data.ref_i} refQ={data.ref_q} color={color} />;
     case "line":
       return (
         <LinePlot
           x={data.x}
           xlabel={data.xlabel}
           ylabel={data.ylabel}
+          xunit={data.xunit}
+          yunit={data.yunit}
           bars={data.bars}
           series={Object.entries(data.series).map(([label, values], k) => ({
             label,
@@ -56,9 +58,9 @@ function render(data: ProbeResult | undefined, color: string) {
         />
       );
     case "eye":
-      return <EyePlot t={data.t} traces={data.traces} />;
+      return <EyePlot t={data.t} tunit={data.tunit} ui={data.ui} traces={data.traces} unit={data.unit} />;
     case "heatmap":
-      return <Heatmap z={data.z} />;
+      return <Heatmap z={data.z} xlabel={data.xlabel} ylabel={data.ylabel} zunit={data.zunit} />;
     default:
       return <div className="scope-empty">{data.type === "message" ? data.text : "Unsupported plot"}</div>;
   }

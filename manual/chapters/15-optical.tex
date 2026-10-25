@@ -54,8 +54,9 @@ An intensity modulator maps the electrical drive $x\in[-1,1]$ to the optical pow
 since the extinction ratio is $\mathrm{ER}=P_1/P_0=(1+m)/(1-m)$. Three non-idealities are
 modelled:
 \begin{itemize}
-  \item \textbf{Relative intensity noise}: multiplicative Gaussian noise of variance
-  $\mathrm{RIN}\cdot f_s/2$ on $P$.
+  \item \textbf{Relative intensity noise}: additive Gaussian noise on $P$ with variance
+  $\mathrm{RIN}\cdot P_{\mathrm{avg}}^2\cdot f_s/2$. As in the IEEE~802.3 link model \cite{cunningham2002}, RIN is
+  referred to the average power.
   \item \textbf{Phase noise}: a Wiener process with the laser linewidth (\cref{eq:wiener}).
   \item \textbf{Transient chirp} of a directly modulated laser. The instantaneous frequency
   follows the power changes, $\Delta\nu(t)=\frac{\alpha}{4\pi}\frac{d}{dt}\ln P(t)$, with $\alpha$
@@ -65,12 +66,29 @@ modelled:
   \end{equation}
 \end{itemize}
 The field is $E=\sqrt P\,e^{j\phi}$.
-\codeexcerpt{im_mod}{Laser intensity modulation with RIN, phase noise and chirp (\blk{intensity_modulator}).}
 
-\begin{pitfall}[Not a rate-equation model]
-The laser is modelled behaviourally (power, chirp, linewidth). Relaxation oscillations, the
-adiabatic chirp term and thermal effects, which require the laser rate equations, are not
-included.
+Two further effects of a directly modulated laser come from the rate equations
+\cite{koch1984,coldren2012}.
+\begin{itemize}
+  \item \textbf{Adiabatic chirp.} The complete chirp is
+  $\Delta\nu=\frac{\alpha}{4\pi}\big(\frac{d}{dt}\ln P+\kappa P\big)$. The second, adiabatic term
+  is a frequency offset proportional to the power. It dominates the frequency excursion of DMLs
+  and turns into intensity distortion after dispersive fiber. The block takes
+  $\kappa_{\mathrm{ad}}=\alpha\kappa/(4\pi)$ in GHz/mW (\prm{adiabatic_chirp_ghz_mw}). It
+  integrates $2\pi\kappa_{\mathrm{ad}}\!\int(P-P_{\mathrm{avg}})\,dt$ into the phase, so the carrier
+  is defined at the average power. A test checks that a power step from $P_0$ to $P_1$ moves the
+  instantaneous frequency by $\kappa_{\mathrm{ad}}(P_1-P_0)$.
+  \item \textbf{Modulation bandwidth.} With \prm{resonance_ghz} set, the drive passes through the
+  small-signal laser response of \cref{sec:mmf} (relaxation resonance, damping, parasitic pole),
+  and its group delay is added to the \code{delay} metadata.
+\end{itemize}
+\codeexcerpt{im_mod}{Laser intensity modulation with bandwidth, RIN, phase noise and chirp (\blk{intensity_modulator}).}
+
+\begin{pitfall}[Small-signal, not large-signal]
+The laser dynamics are linearized: the bandwidth is the small-signal response around the bias,
+and the chirp follows the Koch--Bowers relation. Large-signal effects of the full rate equations
+(gain compression at high modulation depth, turn-on delay near threshold) and thermal effects
+are not included.
 \end{pitfall}
 
 \subsection{Mach--Zehnder and IQ modulators}
@@ -124,6 +142,11 @@ with three ingredients~\cite{agrawal2019}:
   \end{equation}
   \item the Kerr coefficient $\gamma$, given in 1/W/km as \prm{gamma_w_km}.
 \end{itemize}
+For wide WDM grids, or near the zero-dispersion wavelength, the third-order term
+$\frac{\beta_3}{6}\partial_t^3A$ is added, with
+$\beta_3=\big(\frac{\lambda}{2\pi c}\big)^2(\lambda^2S+2\lambda D)$ from the dispersion slope $S$
+(\prm{dispersion_slope_ps_nm2_km}; about 0.057\,ps/nm$^2$/km for G.652 fiber at 1550\,nm~\cite{g652}).
+It is 0 by default, giving the textbook NLSE.
 With the Fourier convention of \cref{eq:fourier-convention}, $\partial_t\to j\omega$, so the
 linear part has the exact solution
 \begin{equation}
@@ -132,6 +155,17 @@ linear part has the exact solution
 \end{equation}
 an all-pass filter with quadratic phase. The dispersion therefore depends only on the
 accumulated $D\ell$ (ps/nm), the quantity tracked in \meta{cd_ps_nm}.
+
+\paragraph{Sign convention.} The envelope follows Agrawal's convention, in which the carrier is
+$e^{-j\omega_0t}$. The dispersion, nonlinear and LO phases all use this convention consistently,
+so solitons, SPM, CD compensation and frequency offsets behave correctly. With NumPy's transform,
+however, a \emph{positive} baseband frequency is a \emph{lower} optical frequency (a longer
+wavelength). This matters for odd-order terms. With slope, the operator is
+$\exp\!\big(j(\tfrac{\beta_2}{2}\omega^2-\tfrac{\beta_3}{6}\omega^3)\ell\big)$ on the NumPy grid, which
+gives the group delay $\tau=D\ell\,\Delta\lambda+\tfrac{S\ell}{2}\Delta\lambda^2$; the test suite
+checks this to within 0.05\,ps. It also matters when WDM channel indices are mapped onto the
+G.694.1 grid. The accumulated slope is tracked in \meta{cd_slope_ps_nm2}, and
+\blk{cd_compensation} removes it together with $D\ell$.
 \codeexcerpt{beta2}{From $D$ to $\beta_2$.}
 \codeexcerpt{disp_op}{The dispersion operator of \cref{eq:dispersion-operator}.}
 
@@ -224,7 +258,7 @@ $\frac89\gamma$, the average over fast random polarization evolution.
   \addplot[sim=accent2,mark size=2pt] table[x=h,y=err]{\datafile{soliton_convergence}};
   \addplot[th=black!50,dashed,domain=0.005:3] {0.09*x^2};
   \legend{split-step,slope 2 ($\propto h^2$)}
-  \draw[accent,densely dotted] (axis cs:2,1e-6) -- (axis cs:2,1) node[pos=0.5,left,font=\scriptsize,rotate=90,anchor=south]{default 0.5 step/km};
+  \draw[accent,densely dotted] (axis cs:2,1e-6) -- (axis cs:2,1) node[pos=0.5,left,font=\scriptsize,rotate=90,anchor=south]{fixed 2 km step};
 \nextgroupplot[xlabel={$t$ [ps]},ylabel={$|A|^2/P_0$},xmin=-30,xmax=30,ymin=0,ymax=1.05,
   legend pos=north east,title={after $4L_D$}]
   \addplot[th=black!70] table[x=t_ps,y=input]{\datafile{soliton_profiles}};
@@ -241,27 +275,52 @@ the pulse, while the balance with SPM preserves it.}
 \label{fig:soliton}
 \end{figure}
 
-\begin{pitfall}[Choosing the step]
-The default \prm{steps_per_km}\code{=0.5} (2-km steps) is adequate for typical launch powers
-around 0\,dBm per channel, where the nonlinear length $1/(\gamma P)$ is hundreds of km. The
-soliton of \cref{fig:soliton} carries 28\,dBm, a nonlinear length of about 1\,km. There the
-default step leaves a 12\,\% error, and 16 steps per km are needed for $10^{-3}$. For high powers,
-dense WDM or solitons, reduce the step until the result stops changing. Without \prm{nonlinear} the solver applies one exact
-FFT for the whole span.
-\end{pitfall}
+\paragraph{Choosing the step.} A fixed step that suits 0\,dBm per channel, where the nonlinear
+length $1/(\gamma P)$ is hundreds of km, is far too long for the 28\,dBm soliton of
+\cref{fig:soliton}, whose nonlinear length is about 1\,km. A fixed 2\,km step leaves a 12\,\% error
+there. The solver therefore uses the nonlinear-phase-rotation criterion of Sinkin et
+al.~\cite{sinkin2003}. Each step is limited so that the peak nonlinear phase
+$\gamma P_{\mathrm{peak}}L_{\mathrm{eff}}$ stays below \prm{nonlinear_phase_rad} (0.05\,rad by
+default), and never exceeds $1/$\prm{steps_per_km}. The step lengthens automatically as the power
+decays along the span. With the defaults the soliton error falls to $3\times10^{-4}$, while
+typical WDM links keep 1--2\,km steps. Without \prm{nonlinear} the solver applies one exact FFT
+for the whole span.
 
 \subsection{Polarization-mode dispersion}
 Random birefringence rotates the state of polarization and delays the two principal states by
-the differential group delay (DGD). The first-order model is
+the differential group delay (DGD). In a real fiber the birefringence changes along the length,
+so the DGD is a random variable. It is Maxwellian distributed with mean
+$\langle\tau\rangle=D_{\mathrm{PMD}}\sqrt\ell$, and it varies with frequency (higher-order PMD).
+LinkStudio uses the coarse-step \emph{waveplate} model~\cite{marcuse1997}. A span is a cascade of
+$N$ birefringent sections (\prm{pmd_sections}, 10 by default), each a fixed DGD $\delta\tau$
+between Haar-random rotations:
 \begin{equation}
-  \tilde{\vect A}_{\mathrm{out}}(\omega)=\mat U_2\begin{pmatrix}e^{j\omega\tau/2}&0\\0&e^{-j\omega\tau/2}\end{pmatrix}\mat U_1\tilde{\vect A}_{\mathrm{in}}(\omega),
-  \qquad\tau=D_{\mathrm{PMD}}\sqrt{\ell},
+  \mat T(\omega)=\mat U_{N+1}\prod_{k=N}^{1}\begin{pmatrix}e^{j\omega\delta\tau/2}&0\\0&e^{-j\omega\delta\tau/2}\end{pmatrix}\mat U_k,
+  \qquad \delta\tau=\langle\tau\rangle\sqrt{\frac{3\pi}{8N}} .
 \end{equation}
-with $\mat U_{1,2}$ Haar-random unitary matrices. These are generated by a QR decomposition of
-a complex Gaussian matrix with the phases of the diagonal of $\mat R$ removed.
-\codeexcerpt{pmd}{Random polarization rotation and first-order PMD.}
-Here $\tau$ is set to its mean value; a full statistical model would draw it from a Maxwellian
-distribution.
+The total DGD then satisfies $\langle\tau^2\rangle=N\delta\tau^2$, and the Maxwellian relation
+$\langle\tau^2\rangle=\frac{3\pi}{8}\langle\tau\rangle^2$ fixes $\delta\tau$. The rotations come from a QR
+decomposition of a complex Gaussian matrix, with the phases of the diagonal of $\mat R$ removed.
+The test suite extracts the DGD of 4000 fibers from the Jones matrix,
+$\tau=\lambda_1-\lambda_2$ with $\lambda_i$ the eigenvalues of $j\,\mat T'\mat T^\dagger$. It finds the
+mean within 1\,\% of $D_{\mathrm{PMD}}\sqrt\ell$ and $\langle\tau^2\rangle/\langle\tau\rangle^2=1.168$
+against $3\pi/8=1.178$ (\cref{fig:pmd}).
+\codeexcerpt{pmd_transfer}{Jones matrices of the waveplate PMD model.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=10cm,height=5.2cm,xlabel={DGD $\tau/\langle\tau\rangle$},ylabel={pdf},xmin=0,xmax=3,ymin=0,
+  legend pos=north east]
+  \addplot[th=accent] table[x=x,y=maxwell]{\datafile{pmd_dgd}};
+  \addplot[sim=accent2,mark size=1.2pt] table[x=x,y=hist]{\datafile{pmd_dgd}};
+  \legend{Maxwellian,{waveplate model, $N=10$}}
+\end{axis}
+\end{tikzpicture}
+\caption{DGD distribution of 20\,000 fibers built by \code{pmd_transfer} against the Maxwellian
+density $\frac{32\tau^2}{\pi^2\langle\tau\rangle^3}e^{-4\tau^2/(\pi\langle\tau\rangle^2)}$.}
+\label{fig:pmd}
+\end{figure}
 
 % ==================================================================
 \section{Optical amplification and OSNR}
@@ -333,7 +392,297 @@ neighbours are switched on.
 \codeexcerpt{wdm_demux}{Channel selection by frequency shift and optical filtering.}
 
 % ==================================================================
+\section{Short-reach links: VCSELs and multimode fiber}\label{sec:mmf}
+Inside a data center most links are shorter than a few hundred metres. They use 850\,nm
+vertical-cavity surface-emitting lasers (VCSELs) over graded-index multimode fiber (MMF). The
+50\,\textmu m core makes coupling and connectors cheap, but it guides hundreds of modes.
+100GBASE-SR4, for example, sends four lanes of 25.78\,GBd NRZ over 70\,m of OM3 or 100\,m of
+OM4. The reach is set by dispersion, not loss. This section builds the fiber model from the
+mode theory of graded-index cores \cite{gloge1973,olshansky1976}, links it to the bandwidth
+model of the IEEE~802.3 link model \cite{cunningham2002}, and adds the transmitter and receiver
+of such a link. The blocks are \blk{vcsel} and \blk{multimode_fiber}, in
+\file{backend/linkstudio/phy/multimode.py}.
+
+\subsection{Why the fiber acts on power}
+Write the field in the fiber as a sum of guided modes, $E(\mathbf r,t)=\sum_m a_m(t)\,\psi_m(\mathbf r)$,
+with orthonormal mode profiles, $\int\psi_m\psi_n^*\,dA=\delta_{mn}$. A photodiode that collects
+the whole core measures
+\begin{equation}
+  P_{\mathrm{out}}(t)=\int|E|^2\,dA=\sum_m|a_m(t)|^2 :
+\end{equation}
+the cross terms between modes vanish by orthogonality. Each mode is excited with a fraction
+$w_m$ of the launched power and arrives after its own group delay $\tau_m$, so
+\begin{equation}
+  P_{\mathrm{out}}(t)=10^{-\alpha_{\mathrm{dB}}L/10}\sum_m w_m\,P_{\mathrm{in}}(t-\tau_m)
+  =10^{-\alpha_{\mathrm{dB}}L/10}\,(h*P_{\mathrm{in}})(t).
+  \label{eq:mmf-power}
+\end{equation}
+The fiber is a linear system for the optical \emph{power}, not for the field. Chromatic dispersion
+fits the same picture. A multimode VCSEL has a spectrum about 0.4\,nm wide (RMS, roughly
+170\,GHz), far wider than the modulation, so its spectral components add incoherently. A
+component at wavelength $\lambda$ is delayed by $D L(\lambda-\lambda_c)$, so the intensity response is
+the source spectrum mapped onto delays. For a Gaussian spectrum of RMS width $\sigma_\lambda$ this is
+a Gaussian of RMS width $|D|L\sigma_\lambda$. The total response is the modal response convolved with
+the chromatic one, $H(f)=H_{\mathrm{modal}}(f)\,H_{\mathrm{cd}}(f)$, and the variances add.
+
+\begin{keypoint}
+SMF links (\cref{sec:nlse}) propagate a coherent field and dispersion is an all-pass filter on
+the field. VCSEL--MMF links propagate incoherent power and dispersion is a low-pass filter on
+the intensity. \blk{multimode_fiber} therefore filters $|E|^2$ and rebuilds the field as
+$\sqrt{P_{\mathrm{out}}}$ with the input phase. It is meant for direct detection.
+\end{keypoint}
+
+\subsection{Mode groups of an $\alpha$-profile core}
+Graded-index cores follow a power law,
+$n^2(r)=n_1^2\big[1-2\Delta(r/a)^\alpha\big]$ for $r<a$, with core radius $a$, peak index $n_1$ and
+contrast $\Delta=\mathrm{NA}^2/(2n_1^2)$. For the standard 50\,\textmu m, NA\,=\,0.2 fiber,
+$\Delta=\mmfdelta$. In the WKB approximation \cite{gloge1973} the number of modes whose
+propagation constant exceeds $\beta$ is
+\begin{equation}
+  m(\beta)=M\Big[\frac{n_1^2k^2-\beta^2}{2\Delta n_1^2k^2}\Big]^{\frac{\alpha+2}{\alpha}},\qquad
+  M=\frac{\alpha}{\alpha+2}\,a^2k^2n_1^2\Delta=\frac{\alpha}{\alpha+2}\,\frac{V^2}{2},
+\end{equation}
+with $V=ka\,\mathrm{NA}$. Inverting it gives the propagation constant of the mode with label
+$m$: $\beta=n_1k\sqrt{1-2\Delta x}$, where $x=(m/M)^{\alpha/(\alpha+2)}$.
+
+\paragraph{Group delay.} The delay per unit length is $\tau/L=c^{-1}\,d\beta/dk$. Keep $m$ fixed
+(the same mode) and note that $M\propto k^2n_1^2$. Then
+$dx/dk=-\frac{\alpha}{\alpha+2}\,x\,\frac{2N_1}{n_1k}$, with group index $N_1=d(n_1k)/dk$, and
+\begin{equation}
+  \frac{d\beta}{dk}=N_1\sqrt{1-2\Delta x}+\frac{n_1k\,\Delta}{\sqrt{1-2\Delta x}}\,\frac{\alpha}{\alpha+2}\,\frac{2N_1x}{n_1k}
+  \;\Longrightarrow\;
+  \tau=\frac{LN_1}{c}\;\frac{1-\frac{4\Delta x}{\alpha+2}}{\sqrt{1-2\Delta x}} .
+  \label{eq:mmf-exact}
+\end{equation}
+Since $\Delta\approx0.01$, expanding to second order loses nothing. Including the profile
+dispersion $\epsilon=-\frac{2n_1}{N_1}\frac{\lambda}{\Delta}\frac{d\Delta}{d\lambda}$ gives the
+Olshansky--Keck form \cite{olshansky1976}:
+\begin{equation}
+  \frac{\tau}{LN_1/c}-1=\Delta\,C_1\,x+\Delta^2C_2\,x^2,\qquad
+  C_1=\frac{\alpha-2-\epsilon}{\alpha+2},\quad C_2=\frac{3\alpha-2-2\epsilon}{2(\alpha+2)} .
+  \label{eq:mmf-delay}
+\end{equation}
+With $\epsilon=0$, \cref{eq:mmf-delay} is the Taylor expansion of \cref{eq:mmf-exact}. The test
+suite checks that the two agree to $\mathcal O(\Delta^3)$.
+
+\paragraph{Overfilled RMS width and the optimum profile.} If every mode carries the same power,
+$u=m/M$ is uniform on $[0,1]$. Then $x=u^q$ with $q=\alpha/(\alpha+2)$ has moments
+$\mathbb E[x^k]=1/(kq+1)$, and the RMS spread of \cref{eq:mmf-delay} follows in closed form:
+\begin{equation}
+  \frac{\sigma_\tau}{LN_1/c}=\Delta\Big[C_1^2\operatorname{Var}x+2\Delta C_1C_2\operatorname{Cov}(x,x^2)+\Delta^2C_2^2\operatorname{Var}x^2\Big]^{1/2}.
+\end{equation}
+The leading term vanishes for $\alpha=2+\epsilon$. Minimizing the whole expression gives
+\cite{olshansky1976}
+\begin{equation}
+  \alpha_{\mathrm{opt}}=2+\epsilon-\Delta\frac{(4+\epsilon)(3+\epsilon)}{5+2\epsilon},\qquad
+  \sigma_{\min}\approx\frac{LN_1\Delta^2}{20\sqrt3\,c},
+\end{equation}
+that is $\alpha_{\mathrm{opt}}=\mmfalphaopt$ and $\sigma_{\min}=\mmfsigmamin$\,ps/km for our fiber.
+A parabolic core ($\alpha=2$) is already five times worse. A profile error of only $\pm0.01$ in
+$\alpha$ multiplies the spread by two to three (\cref{fig:mmf-profile}). This sensitivity is why
+real fibers are graded by measured bandwidth rather than by profile.
+
+\paragraph{Discrete groups.} Modes with equal principal mode number are degenerate and travel
+together. A core holds about $G=\sqrt M$ such groups: \mmfgroups{} for OM4 at 850\,nm. Group
+$\mu$ ($\mu=1\dots G$) holds the $2\mu-1$ modes between $u=((\mu-1)/G)^2$ and $(\mu/G)^2$. The
+block evaluates \cref{eq:mmf-delay} at the group centre and removes the mean delay, so the
+response does not include the bulk latency.
+\codeexcerpt{mmf_delay}{Group delay of \cref{eq:mmf-delay}.}
+\codeexcerpt{mmf_groups}{Group delays and launch weights.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=16mm},width=6.9cm,height=5.4cm]
+\nextgroupplot[xlabel={normalized group number $(\mu-\frac12)/G$},ylabel={relative delay [ps/km]},
+  xmin=0,xmax=1,ymin=-450,ymax=450,legend style={font=\scriptsize,at={(0.03,0.97)},anchor=north west}]
+  \addplot[sim=accent3,mark size=1.2pt] table[x=x,y=d]{\datafile{mmf_delays_opt}};
+  \addplot[sim=accent,mark size=1.2pt] table[x=x,y=d]{\datafile{mmf_delays_om4}};
+  \addplot[sim={accent2,mark=square*},mark size=1.1pt] table[x=x,y=d]{\datafile{mmf_delays_om3}};
+  \addplot[sim={black!60,mark=triangle*},mark size=1.3pt] table[x=x,y=d]{\datafile{mmf_delays_parabolic}};
+  \legend{$\alpha_{\mathrm{opt}}$,OM4 default,OM3 default,$\alpha=2$}
+\nextgroupplot[xlabel={profile exponent $\alpha$},ylabel={overfilled RMS width [ps/km]},
+  xmin=1.9,xmax=2.1,ymin=0,ymax=340,legend style={font=\scriptsize,at={(0.5,0.97)},anchor=north}]
+  \addplot[th=accent] table[x=alpha,y=rms]{\datafile{mmf_rms_theory}};
+  \addplot[sim=accent2] table[x=alpha,y=rms]{\datafile{mmf_rms_sim}};
+  \legend{continuum theory,\blk{multimode_fiber} groups}
+\end{groupplot}
+\end{tikzpicture}
+\caption{Left: delays of the mode groups over 1\,km for the optimum profile, the default OM4
+and OM3 profiles and a parabolic core. Right: overfilled RMS width against $\alpha$. The line is
+the continuum moment formula; the markers are the discrete-group block. The 18--19 groups follow
+the theory closely except near $\alpha_{\mathrm{opt}}$, where the residual spread is set by the
+discreteness of the groups.}
+\label{fig:mmf-profile}
+\end{figure}
+
+\subsection{Launch conditions}
+The power distribution $w_\mu$ depends on how light enters the fiber.
+\begin{itemize}
+  \item \textbf{Overfilled launch} (every mode equally): $w_\mu\propto2\mu-1$. It excites the
+  outer groups strongly. The \emph{overfilled launch} (OFL) bandwidth is defined with it.
+  \item \textbf{Gaussian beam} (\prm{launch}\code{=gaussian}). In a parabolic core the modes are
+  the Hermite--Gauss modes of a two-dimensional harmonic oscillator, with fundamental field
+  radius $w_0=\sqrt{a\lambda/(\pi\,\mathrm{NA})}\approx5.8$\,\textmu m. Group $p=\mu-1$ collects
+  the modes with $n_x+n_y=p$. A beam of radius $w$ displaced by $r_0$ along $x$ separates into
+  $x$ and $y$ factors, so the group powers follow from one-dimensional overlap integrals,
+  computed numerically in the block.
+\end{itemize}
+Two cases have exact closed forms and serve as checks (\cref{fig:mmf-launch}):
+\begin{itemize}
+  \item a matched beam ($w=w_0$) displaced by $r_0$ is a coherent state of the oscillator, so the
+  group powers are Poisson distributed with mean $r_0^2/w_0^2$;
+  \item a centred beam of the wrong size is a squeezed state, which excites only even groups,
+  with geometric weights $(1-t)\,t^{p/2}$, $t=\big((w^2-w_0^2)/(w^2+w_0^2)\big)^2$.
+\end{itemize}
+\codeexcerpt{mmf_launch}{Gaussian-beam coupling into the principal mode groups.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=14mm},width=6.9cm,height=4.8cm,
+  xlabel={group index $p=\mu-1$},xmin=-0.5,xmax=11.5,ymin=0]
+\nextgroupplot[title={offset launch, $w=w_0$, $r_0=1.5\,w_0$},ylabel={power fraction},ymax=0.3,
+  legend style={font=\scriptsize}]
+  \addplot[ycomb,accent,thick] table[x=p,y=offset_th]{\datafile{mmf_launch}};
+  \addplot[sim=accent2] table[x=p,y=offset_sim]{\datafile{mmf_launch}};
+  \legend{Poisson$(2.25)$,block}
+\nextgroupplot[title={centred launch, $w=4$\,\textmu m},ymax=1,legend style={font=\scriptsize}]
+  \addplot[ycomb,accent,thick] table[x=p,y=centre_th]{\datafile{mmf_launch}};
+  \addplot[sim=accent2] table[x=p,y=centre_sim]{\datafile{mmf_launch}};
+  \legend{$(1-t)\,t^{p/2}$,block}
+\end{groupplot}
+\end{tikzpicture}
+\caption{Mode-group powers computed by \code{gaussian_launch_weights} against the coherent-state
+(left) and squeezed-state (right) closed forms.}
+\label{fig:mmf-launch}
+\end{figure}
+
+A centred launch puts almost all the power in the lowest groups, which travel close together.
+This is why a restricted launch gives a much higher bandwidth than the overfilled one, and why
+the \emph{effective modal bandwidth} (EMB) used for VCSEL links exceeds the OFL bandwidth
+(\cref{tab:om}).
+
+\subsection{Fiber classes and the bandwidth model}
+Fiber classes are specified by bandwidth--length products rather than by profile
+(\cref{tab:om}).
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Multimode fiber classes at 850\,nm (ISO/IEC~11801, TIA-568.3, IEC~60793-2-10) as used by
+\blk{multimode_fiber}.}
+\label{tab:om}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+class & core [\textmu m] & NA & OFL BW [MHz\,km] & EMB [MHz\,km] & loss [dB/km]\\
+\midrule
+OM1 & 62.5 & 0.275 & 200 & -- & 3.5\\
+OM2 & 50 & 0.200 & 500 & -- & 3.5\\
+OM3 & 50 & 0.200 & 1500 & 2000 & 3.5\\
+OM4 & 50 & 0.200 & 3500 & 4700 & 3.5\\
+OM5 & 50 & 0.200 & 3500 & 4700 & 3.5\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Gaussian bandwidth model} (\prm{model}\code{=bandwidth}, the default). The IEEE~802.3
+link model \cite{cunningham2002} assumes Gaussian responses. For
+$H(f)=\exp(-2\pi^2\sigma^2f^2)$ the 3-dB optical bandwidth satisfies $H(B)=\frac12$, hence
+\begin{equation}
+  B\,\sigma=\frac{\sqrt{\ln2/2}}{\pi}\approx0.187 .
+\end{equation}
+The modal width over a length $L$ is $\sigma_{\mathrm{modal}}=0.187\,L/\mathrm{EMB}$ (linear length
+scaling, as in the link model). The chromatic width uses the dispersion of the fiber at the
+source wavelength, $D_1=\frac{S_0\lambda}{4}\big(1-(\lambda_0/\lambda)^4\big)$, about
+$-100$\,ps/(nm\,km) at 850\,nm for $\lambda_0=1320$\,nm and $S_0=0.101$\,ps/(nm$^2$\,km). It adds a
+second-order term $D_2=0.7S_0\sigma_\lambda$ for the spectral width:
+\begin{equation}
+  \sigma_{\mathrm{cd}}=L\,\sigma_\lambda\sqrt{D_1^2+D_2^2}.
+\end{equation}
+\codeexcerpt{mmf_chromatic}{Chromatic RMS width of the IEEE~802.3 link model.}
+
+\paragraph{Mode-group model} (\prm{model}\code{=mode_groups}). The response is the sum of
+delayed impulses of \cref{eq:mmf-power}, multiplied by the Gaussian chromatic response.
+Without an explicit \prm{alpha}, the block detunes the profile from $\alpha_{\mathrm{opt}}$ until
+the overfilled RMS width of the discrete groups equals $0.187/\mathrm{OFL}$. The result is
+$\alpha=\mmfalphaomfour$ for OM4 and $\alpha=\mmfalphaomthree$ for OM3. The fiber then meets its
+class specification by construction, and the launch options show how far a real transmitter
+improves on the overfilled launch.
+\codeexcerpt{mmf_response}{Power transfer function of the fiber.}
+
+\begin{incode}
+The spectral width comes from the \code{spectral_width_nm} metadata set by \blk{vcsel}, or from
+\prm{source_rms_width_nm}. Filtering uses \code{apply_frequency_response} on $|E|^2$. Dual
+polarization inputs are summed into one intensity. The metrics report the modal and chromatic
+RMS widths, the resulting Gaussian-equivalent bandwidth and, for a Gaussian launch, the fraction
+of power coupled into guided modes (also applied as a loss).
+\end{incode}
+
+\subsection{VCSEL transmitter and reference receiver}
+Linearizing the laser rate equations around the bias point gives the small-signal modulation
+response of a semiconductor laser, a damped second-order resonance. The RC parasitics of the
+chip add a pole \cite{coldren2012}:
+\begin{equation}
+  H(f)=\frac{f_r^2}{f_r^2-f^2+jf\gamma/(2\pi)}\cdot\frac{1}{1+jf/f_p},
+\end{equation}
+with relaxation-oscillation frequency $f_r$, damping rate $\gamma$ and parasitic frequency $f_p$.
+Without parasitics and with weak damping the 3-dB bandwidth tends to $\sqrt{1+\sqrt2}\,f_r\approx1.55f_r$,
+a limit the test suite checks. The default 25G-class device ($f_r=20$\,GHz,
+$\gamma=100$\,ns$^{-1}$, $f_p=20$\,GHz) has a bandwidth of 22.6\,GHz. \blk{vcsel} normalizes and
+filters the drive, maps it to power with the extinction ratio (4\,dB by default, typical of
+VCSELs), clips negative power (the laser stops emitting below threshold) and adds RIN. The group
+delay of $H$ at DC is added to the \code{delay} metadata, so the receiver samples at the eye
+centre.
+\codeexcerpt{vcsel_response}{Small-signal VCSEL response.}
+
+Optical Ethernet specifies receivers through a reference response: a fourth-order
+Bessel--Thomson low-pass at $0.75R_s$. \blk{photodiode} applies it when \prm{bandwidth_ghz} is set.
+The filter acts on signal and noise. The reported \code{noise_var} is scaled by the noise
+bandwidth of the filter, $\frac1{f_s}\int|H|^2df$, so the result no longer depends on the
+simulation sample rate.
+
+\subsection{A 25G data-center lane}
+The \emph{25G VCSEL multimode data-center link} scenario chains \blk{pulse_shaper} (NRZ),
+\blk{vcsel}, \blk{multimode_fiber}, \blk{photodiode} (0.75$R_s$ Bessel--Thomson) and \blk{agc},
+followed by the decision. \Cref{fig:mmf-eyes} shows the received eyes. At 100\,m of OM4 the
+fiber hardly matters: the eye shows the VCSEL ringing and the receiver filter. At 300\,m the
+modal and chromatic widths grow to about 12\,ps each, about a third of the 38.8\,ps symbol, and
+the eye starts closing. OM3 at 300\,m, with an EMB less than half that of OM4, closes it. The
+test suite checks that BER is below $10^{-3}$ for OM4 at 100\,m and above $10^{-2}$ for OM3 at
+300\,m.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=3 by 1,horizontal sep=6mm,y descriptions at=edge left},
+  width=5.3cm,height=4.6cm,xmin=-1,xmax=1,ymin=0.05,ymax=0.4,xlabel={$t/T$},xtick={-1,0,1}]
+\nextgroupplot[title={OM4, 100\,m},ylabel={photocurrent [mA]}]
+  \addplot[accent,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_om4_100}};
+\nextgroupplot[title={OM4, 300\,m}]
+  \addplot[accent3,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_om4_300}};
+\nextgroupplot[title={OM3, 300\,m}]
+  \addplot[accent2,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_om3_300}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Received eyes of the data-center lane (25.78\,GBd NRZ, $-4$\,dBm VCSEL, 16 samples per
+symbol, RIN off for clarity), cut from the \blk{photodiode} output.}
+\label{fig:mmf-eyes}
+\end{figure}
+
+\begin{pitfall}[What the multimode model leaves out]
+The IEEE link model also budgets mode-partition noise (the VCSEL modes fluctuate in power while
+the total stays constant, which dispersion turns into noise) and modal noise (speckle filtered
+by connector offsets). Neither is modelled yet. The mode-group model also ignores the coupling
+between modal and chromatic dispersion (each group has its own wavelength dependence
+\cite{golowich2003}), differential mode attenuation and mode coupling. These effects are small for
+the short, well-made links the classes describe. Statistically realistic fibers would need DMD
+templates measured according to IEC~60793-1-49.
+\end{pitfall}
+
+% ==================================================================
 \section{Free-space optics}
+\subsection{Scintillation}
 Atmospheric turbulence makes the received intensity fluctuate (scintillation). \blk{fso_turbulence}
 multiplies the field by $\sqrt h$, where the normalized irradiance $h$ ($\E h=1$) is constant
 over a frame and follows one of two models.
@@ -364,11 +713,53 @@ over a frame and follows one of two models.
 \label{fig:fso}
 \end{figure}
 
+The parameters follow from the turbulence strength. For a plane wave the Rytov variance is
+$\sigma_R^2=1.23\,C_n^2k^{7/6}L^{11/6}$, with $C_n^2$ the refractive-index structure parameter
+(about $10^{-16}$ to $10^{-13}$\,m$^{-2/3}$ at optical wavelengths~\cite{p1814}). Al-Habash, Andrews and
+Phillips~\cite{alhabash2001} give
+\begin{equation}
+  \alpha=\Big[e^{0.49\sigma_R^2/(1+1.11\sigma_R^{12/5})^{7/6}}-1\Big]^{-1},\qquad
+  \beta=\Big[e^{0.51\sigma_R^2/(1+0.69\sigma_R^{12/5})^{5/6}}-1\Big]^{-1}.
+\end{equation}
+For example, $\sigma_R^2=1$ gives $\alpha=4.39$ and $\beta=2.56$. The scintillation index of the
+gamma-gamma model is $\sigma_I^2=1/\alpha+1/\beta+1/(\alpha\beta)$. With \prm{rytov_variance} set,
+\blk{fso_turbulence} derives $\alpha$ and $\beta$, and the log-normal variance
+$\ln(1+\sigma_I^2)$, so both models share the same scintillation index. In weak turbulence that
+index tends to $\sigma_R^2$.
+
+\subsection{The complete link: \blk{fso_channel}}
+\blk{fso_channel} computes the whole budget of ITU-R P.1814~\cite{p1814} from geometry and weather.
+\begin{itemize}
+  \item \textbf{Atmospheric attenuation} from the visibility $V$ (2\,\% contrast threshold, km),
+  with Kim's size-distribution exponent:
+  \begin{equation}
+    \gamma_{\mathrm{sp}}=\frac{17}{V}\Big(\frac{0.55\,\mu\mathrm m}{\lambda}\Big)^{q}\ \mathrm{dB/km},\qquad
+    q=\begin{cases}1.6 & V>50\\ 1.3 & 6<V\le50\\ 0.16V+0.34 & 1\le V\le6\\ V-0.5 & 0.5\le V<1\\ 0 & V<0.5 .\end{cases}
+  \end{equation}
+  Light fog ($V=1$\,km) costs 10\,dB/km at 1550\,nm; haze at $V=5$\,km about 1\,dB/km.
+  \item \textbf{Geometric loss}: the beam of full divergence $\theta$ covers the area
+  $\frac\pi4(d\theta)^2$, so a receiver of diameter $D_R$ collects
+  $A_{\mathrm{geo}}=20\log_{10}(d\theta/D_R)$\,dB, or 0 when the aperture catches the whole beam.
+  \item \textbf{Scintillation} from $C_n^2$ via $\sigma_R^2$, as above.
+  \item \textbf{Pointing errors}~\cite{farid2007}. Building sway gives a radial beam offset
+  $r\sim\mathrm{Rayleigh}(\sigma_s)$ on the receiver plane. A Gaussian beam of radius
+  $w_z=d\theta/2$ on an aperture of radius $a$ then collects
+  $h_p=e^{-2r^2/w_{z,\mathrm{eq}}^2}$ relative to perfect alignment, with
+  $w_{z,\mathrm{eq}}^2=w_z^2\sqrt\pi\,\mathrm{erf}(v)/(2v\,e^{-v^2})$ and $v=\sqrt{\pi/2}\,a/w_z$. On
+  average $\E h_p=w_{z,\mathrm{eq}}^2/(w_{z,\mathrm{eq}}^2+4\sigma_s^2)$, which the test suite checks.
+\end{itemize}
+All fading terms are quasi-static (one value per frame) and appear on \code{csi}. The metrics give
+each loss term and $\sigma_R^2$. Aperture averaging, beam wander and time-correlated fading are not
+modelled. The \emph{Free-space optical link budget} scenario runs a 1\,Gb/s OOK link over 1\,km
+with all four effects.
+\codeexcerpt{fso_channel}{Losses and fading of \blk{fso_channel}.}
+
 % ==================================================================
 \section{Direct detection}
 \subsection{PIN and APD receivers}
 A photodiode converts power into current, $I=\mathcal RP$, with responsivity $\mathcal R$
-(A/W). Over the noise bandwidth $B=f_s/2$ the current carries three contributions:
+(A/W). Over the noise bandwidth $B=f_s/2$ (or through the reference receiver filter of
+\cref{sec:mmf} when \prm{bandwidth_ghz} is set) the current carries three contributions:
 \begin{itemize}
   \item \textbf{shot noise}, $\sigma_{\mathrm{sh}}^2=2qM^2F\,(\mathcal RP+I_d)B$;
   \item \textbf{thermal noise}, $\sigma_{\mathrm{th}}^2=i_n^2B$, with $i_n$ the input-referred
@@ -424,8 +815,11 @@ $|E_{\mathrm{LO}}|^2$ and leaves the beat term:
   i_I+j\,i_Q=\mathcal R\sqrt{P_{\mathrm{LO}}}\;E(t)\,e^{-j(2\pi\Delta f\,t+\phi_{\mathrm{LO}}(t))}+n(t).
 \end{equation}
 The field is thus translated linearly to the electrical domain, including its phase and
-polarization. With a strong LO, the LO shot noise $2q\mathcal RP_{\mathrm{LO}}B$ dominates the
-thermal noise.
+polarization. With dual polarization a splitter feeds each hybrid with half of the LO, so
+$P_{\mathrm{LO}}$ above is \prm{lo_power_dbm} divided by the number of polarizations
+(\cref{fig:coherent-fe}). With a strong LO, the LO shot noise $2q\mathcal RP_{\mathrm{LO}}B$ dominates
+the thermal noise. The signal and the shot noise then scale together, so the LO split does not
+change the shot-noise-limited SNR, but it does change the margin over thermal noise.
 
 \begin{figure}[htbp]
 \centering

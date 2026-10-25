@@ -1,5 +1,9 @@
 def noise_variance(self, x: Signal) -> float:
     p = self.params
+    if p.mode == "thermal":
+        if not x.fs:
+            raise BlockError("Thermal noise needs the sample rate (fs) of the signal.")
+        return 1.380649e-23 * p.temperature_k * 10 ** (p.noise_figure_db / 10) * x.fs
     if p.signal_power is not None:
         power = p.signal_power
     elif p.power_reference == "nominal" and x.meta.get("power") is not None:

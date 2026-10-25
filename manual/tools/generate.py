@@ -651,6 +651,111 @@ def fig_fso():
     save("fso_pdf", cols)
 
 
+@figure
+def fig_pic_loop():
+    from linkstudio.phy.wireline import cable_response
+    f = np.geomspace(10e3, 2e6, 120)
+    save("pic_loss", {"f_khz": f / 1e3, "model": -20 * np.log10(np.abs(cable_response(f, "pic_26awg", 1828.8))),
+                      "fit": -20 * np.log10(np.abs(cable_response(f, "dsl_0.4mm", 1828.8)))})
+    # ITU-T G.996.1 Table 2, loop Mid-C at 70 F
+    save("pic_g9961", {"f_khz": [20, 40, 100, 200, 260, 300, 400, 500, 600, 780, 1100],
+                       "table": [13.3, 16.2, 20.0, 23.4, 25.4, 26.8, 30.1, 33.2, 36.3, 41.3, 49.1]})
+
+
+@figure
+def fig_pmd_dgd():
+    from linkstudio.phy.optical import pmd_transfer
+    dw = 2 * np.pi * 1e8
+    t = pmd_transfer(np.random.default_rng(4), 20000, np.array([-dw, 0.0, dw]), 1.0e-12, 10)
+    td = (t[:, 2] - t[:, 0]) / (2 * dw)
+    m = 1j * np.einsum("bij,bkj->bik", td, t[:, 1].conj())
+    ev = np.linalg.eigvalsh((m + np.conj(np.transpose(m, (0, 2, 1)))) / 2)
+    x = (ev[:, 1] - ev[:, 0]) / 1.0e-12
+    hist, edges = np.histogram(x, bins=40, range=(0, 3), density=True)
+    c = 0.5 * (edges[1:] + edges[:-1])
+    save("pmd_dgd", {"x": c, "hist": hist, "maxwell": 32 * c ** 2 / np.pi ** 2 * np.exp(-4 * c ** 2 / np.pi)})
+
+
+@figure
+def fig_pathloss():
+    from linkstudio.core.registry import create_block
+    from linkstudio.phy.channel.propagation import free_space_loss_db, tr38901_path_loss_db
+    d = np.geomspace(10, 1000, 60)
+    cols = {"d": d, "fs": free_space_loss_db(np.hypot(d, 10 - 1.5), 3.5)}
+    for sc, hbs in (("uma", 25.0), ("umi", 10.0)):
+        for name, los in (("los", True), ("nlos", False)):
+            cols[f"{sc}_{name}"] = tr38901_path_loss_db(sc, np.full(d.size, los), d, 3.5, hbs, 1.5)[0]
+    sim = []
+    for dist in d:
+        blk = create_block("path_loss", model="umi", frequency_ghz=3.5, distance_m=float(dist))
+        blk.reset(5, "pl")
+        sim.append(float(np.mean(blk.draw_loss_db(4000)[0])))
+    cols["umi_sim"] = np.where(np.arange(d.size) % 4 == 0, sim, np.nan)
+    save("pathloss", cols)
+
+
+@figure
+def fig_mmf_profiles():
+    from linkstudio.phy.multimode import C_LIGHT, optimum_alpha, overfilled_rms, profile_contrast
+    from linkstudio.core.registry import create_block
+
+    def fiber(**params):
+        blk = create_block("multimode_fiber", model="mode_groups", length_m=1000.0, **params)
+        blk.setup()
+        return blk
+
+    delta, n1g = profile_contrast(0.2, 1.467), 1.482
+    per_km_ps = n1g / C_LIGHT * 1e3 * 1e12  # relative delay -> ps/km
+    fine = np.linspace(1.90, 2.10, 201)
+    save("mmf_rms_theory", {"alpha": fine, "rms": [overfilled_rms(a, delta) * per_km_ps for a in fine]})
+    coarse = np.round(np.arange(1.90, 2.1001, 0.01), 3)
+    save("mmf_rms_sim", {"alpha": coarse, "rms": [fiber(alpha=float(a)).modal_rms_s() * 1e12 for a in coarse]})
+    a_opt = optimum_alpha(delta)
+    for name, blk in (("opt", fiber(alpha=a_opt)), ("parabolic", fiber(alpha=2.0)),
+                      ("om4", fiber(fiber_type="OM4")), ("om3", fiber(fiber_type="OM3"))):
+        w, d = blk.groups
+        g = len(w)
+        save(f"mmf_delays_{name}", {"x": (np.arange(1, g + 1) - 0.5) / g, "d": d * 1e3 * 1e12})
+    with open(OUT / "mmf.tex", "w") as fh:
+        fh.write(f"\\newcommand{{\\mmfalphaopt}}{{{a_opt:.4f}}}\n")
+        fh.write(f"\\newcommand{{\\mmfalphaomfour}}{{{fiber(fiber_type='OM4').profile_alpha(850):.4f}}}\n")
+        fh.write(f"\\newcommand{{\\mmfalphaomthree}}{{{fiber(fiber_type='OM3').profile_alpha(850):.4f}}}\n")
+        fh.write(f"\\newcommand{{\\mmfdelta}}{{{delta:.4f}}}\n")
+        fh.write(f"\\newcommand{{\\mmfgroups}}{{{len(fiber(fiber_type='OM4').groups[0])}}}\n")
+        fh.write(f"\\newcommand{{\\mmfsigmamin}}{{{overfilled_rms(a_opt, delta) * per_km_ps:.1f}}}\n")
+
+
+@figure
+def fig_mmf_launch():
+    from scipy.stats import poisson
+    from linkstudio.phy.multimode import gaussian_launch_weights
+    w0 = np.sqrt(25e-6 * 850e-9 / (np.pi * 0.2)) * 1e6
+    p = np.arange(12)
+    offset = gaussian_launch_weights(19, w0, 1.5 * w0, w0)[:12]
+    centre = gaussian_launch_weights(19, 4.0, 0.0, w0)[:12]
+    t = ((4.0 ** 2 - w0 ** 2) / (4.0 ** 2 + w0 ** 2)) ** 2
+    save("mmf_launch", {"p": p, "offset_sim": offset, "offset_th": poisson.pmf(p, 2.25),
+                        "centre_sim": centre, "centre_th": np.where(p % 2 == 0, (1 - t) * t ** (p // 2), 0.0)})
+
+
+@figure
+def fig_mmf_eyes():
+    from linkstudio.phy.dsp.analysis import eye_traces
+    sc = cs.load_scenario(BACKEND / "scenarios" / "optical" / "datacenter_vcsel_mmf.yaml")
+    g = sc.graph
+    sps = 16
+    g.set_param("tx.sps", sps)
+    g.set_param("laser.rin_db_hz", None)
+    x = np.arange(2 * sps + 1) / sps - 1.0
+    for name, fiber_type, length in (("om4_100", "OM4", 100.0), ("om4_300", "OM4", 300.0), ("om3_300", "OM3", 300.0)):
+        g.set_param("fib.fiber_type", fiber_type)
+        g.set_param("fib.length_m", length)
+        sig = capture(g, ["pd.out"], batch=1)["pd.out"]
+        start = int(round(sig.meta["delay"])) - sps + 20 * sps
+        tr = eye_traces(sig.data.real, sps, offset=start, symbols_per_trace=2, max_traces=80)
+        save_traces(f"eye_{name}", tr * 1e3, x)  # mA
+
+
 # ================================================================ statistics
 @figure
 def fig_wilson():
@@ -668,6 +773,7 @@ SNIPPETS: list[tuple[str, str, str | None, str | None]] = [
     ("graph_toposort", "linkstudio.core.graph.Graph._toposort", None, None),
     ("graph_execute", "linkstudio.core.graph.Graph.execute", r"for name in self.order", r"values\[f\"\{name\}"),
     ("stop_check", "linkstudio.core.simulation.StopCriteria.check", None, None),
+    ("parallel_merge", "linkstudio.core.parallel.run_batches", r"while reason is None and next_merge", r"reason = done"),
     ("sweep_point", "linkstudio.core.sweep.Sweep.run", r"for i, point in enumerate", r"res = sim.run"),
     ("awgn_noise_var", "linkstudio.phy.channel.awgn.AWGN.noise_variance", None, None),
     ("awgn_process", "linkstudio.phy.channel.awgn.AWGN.process", None, None),
@@ -718,7 +824,7 @@ SNIPPETS: list[tuple[str, str, str | None, str | None]] = [
     ("disp_op", "linkstudio.phy.optical.dispersion_operator", None, None),
     ("beta2", "linkstudio.phy.optical.beta2", None, None),
     ("ssfm", "linkstudio.phy.optical.propagate", None, None),
-    ("pmd", "linkstudio.phy.optical.apply_pmd", None, None),
+    ("pmd_transfer", "linkstudio.phy.optical.pmd_transfer", r"t = np.broadcast_to", None),
     ("ase", "linkstudio.phy.optical.ase_psd", None, None),
     ("add_ase", "linkstudio.phy.optical._add_ase", None, None),
     ("osnr", "linkstudio.phy.optical.osnr_db", None, None),
@@ -730,7 +836,22 @@ SNIPPETS: list[tuple[str, str, str | None, str | None]] = [
     ("butterfly", "linkstudio.phy.optical.AdaptiveMIMOEqualizer.process", r"for k in range\(n_sym", r"W \+= mu"),
     ("bps", "linkstudio.phy.optical.PhaseRecovery.process", r"if p.method == \"viterbi", r"phi = np.unwrap"),
     ("wdm_demux", "linkstudio.phy.optical.WDMDemultiplexer.process", r"shift = ", r"y = np.fft"),
-    ("fso", "linkstudio.phy.optical.FSOTurbulence.process", r"if p.model", r"gain = "),
+    ("fso", "linkstudio.phy.optical.FSOTurbulence.draw", r"s2, a, b = ", None),
+    ("fso_params", "linkstudio.phy.optical.gamma_gamma_parameters", r"s125 = ", None),
+    ("rin", "linkstudio.phy.optical.intensity_noise", r"if rin_db_hz", None),
+    ("mmf_delay", "linkstudio.phy.multimode.group_delay", r"x = np.asarray", None),
+    ("mmf_rms", "linkstudio.phy.multimode.overfilled_rms", r"q = alpha", None),
+    ("mmf_chromatic", "linkstudio.phy.multimode.chromatic_rms_ps_per_km", r"d1 = ", None),
+    ("mmf_groups", "linkstudio.phy.multimode.MultimodeFiber._weights_delays", r"g = max", None),
+    ("mmf_launch", "linkstudio.phy.multimode.gaussian_launch_weights", r"xi = np.linspace", None),
+    ("mmf_response", "linkstudio.phy.multimode.MultimodeFiber.response", r"p = self.params", None),
+    ("mmf_default_alpha", "linkstudio.phy.multimode.MultimodeFiber.profile_alpha", r"p = self.params", None),
+    ("vcsel_response", "linkstudio.phy.optical.laser_response", r"h = resonance", None),
+    ("delay_kernel", "linkstudio.phy.channel.fading.delay_kernel", r"whole = ", None),
+    ("tr38901", "linkstudio.phy.channel.propagation.tr38901_path_loss_db", r"d2d = ", None),
+    ("dielectric", "linkstudio.phy.wireline.dielectric_response", r"if loss_db_m_hz == 0", None),
+    ("pic", "linkstudio.phy.wireline.pic_response", r"r, ind, g, c = ", None),
+    ("fso_channel", "linkstudio.phy.optical.FSOChannel.process", r"atm = ", r"out = x.data"),
 ]
 
 

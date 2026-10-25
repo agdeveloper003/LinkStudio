@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import fftconvolve
+from scipy.signal import bessel, fftconvolve, freqs
 
 
 def _time_axis(sps: int, span: int) -> np.ndarray:
@@ -126,3 +126,15 @@ def fractional_delay_taps(delay: float, half_len: int = 16) -> np.ndarray:
     n = np.arange(2 * half_len + 1)
     h = np.sinc(n - half_len - delay) * np.blackman(2 * half_len + 1)
     return h / np.sum(h)
+
+
+def dc_group_delay(response, fs: float) -> float:
+    """Group delay (s) of ``response(f)`` at zero frequency, from the phase slope near f = 0."""
+    df = fs * 1e-6
+    return float(-np.angle(response(np.array([df]))[0]) / (2 * np.pi * df))
+
+
+def bessel_thomson(f: np.ndarray, bandwidth_hz: float, order: int = 4) -> np.ndarray:
+    """Bessel-Thomson low-pass response, -3 dB at ``bandwidth_hz`` (optical reference receiver)."""
+    b, a = bessel(order, 2 * np.pi * bandwidth_hz, analog=True, norm="mag")
+    return freqs(b, a, worN=2 * np.pi * np.asarray(f, dtype=float))[1]

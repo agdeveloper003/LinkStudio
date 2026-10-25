@@ -277,6 +277,16 @@ class Graph:
                 out[f"{name}{sep}{key}"] = value
         return out
 
+    def export_state(self) -> dict[str, dict[str, Any]]:
+        """Accumulator state of every block (see :meth:`Block.export_state`)."""
+        return {name: block.export_state() for name, block in self.blocks.items()}
+
+    def merge_state(self, state: Mapping[str, Mapping[str, Any]]) -> None:
+        """Merge the state exported by another copy of this graph."""
+        for name, block_state in state.items():
+            if name in self.blocks:
+                self.blocks[name].merge_state(block_state)
+
     # ------------------------------------------------------------------- misc
     def describe(self, indent: str = "") -> str:
         """Readable multi-line description of blocks and connections."""

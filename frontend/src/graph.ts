@@ -1,7 +1,7 @@
 // Editor graph state helpers: conversion between React Flow and the API format.
 
 import type { Edge, Node } from "@xyflow/react";
-import type { BlockInfo, Catalogue, EditorGraph, InstancePort, JsonSchema, Probe, Validation } from "./api";
+import type { BlockInfo, Catalogue, EditorGraph, InstancePort, JsonSchema, PortPlace, Probe, Validation } from "./api";
 
 export interface BlockData extends Record<string, unknown> {
   type: string;
@@ -10,6 +10,8 @@ export interface BlockData extends Record<string, unknown> {
   inputs: InstancePort[];
   outputs: InstancePort[];
   probed: string[];
+  /** Ports moved by the user ("in:name" / "out:name"); the others use the default place. */
+  ports?: Record<string, PortPlace>;
   error?: boolean;
 }
 
@@ -59,6 +61,7 @@ export function toEditorGraph(
       type: n.data.type,
       params: n.data.params,
       position: { x: n.position.x, y: n.position.y },
+      ...(n.data.ports && Object.keys(n.data.ports).length ? { ports: n.data.ports } : {}),
       ...(n.data.spec ? { spec: n.data.spec } : {}),
     };
   }
@@ -95,6 +98,7 @@ export function fromEditorGraph(graph: EditorGraph, catalogue: Catalogue): { nod
         inputs: inst?.inputs ?? fallback.inputs,
         outputs: inst?.outputs ?? fallback.outputs,
         probed: probedBy[name] ?? [],
+        ports: b.ports,
       },
     };
   });

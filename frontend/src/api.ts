@@ -41,10 +41,19 @@ export interface Probe {
   view?: string;
 }
 
+export type Side = "left" | "right" | "top" | "bottom";
+
+/** Where a port sits on the block border: side and position along it (0..1). */
+export interface PortPlace {
+  side: Side;
+  offset: number;
+}
+
 export interface EditorBlock {
   type: string;
   params: Record<string, unknown>;
   position?: { x: number; y: number };
+  ports?: Record<string, PortPlace>;
   spec?: Record<string, unknown>;
 }
 
@@ -86,12 +95,23 @@ export interface ScenarioItem {
   blocks: number;
 }
 
+// Physical values are in base SI units; the UI picks the prefix from the unit.
 export type PlotData =
-  | { type: "scatter"; i: number[]; q: number[]; ref_i?: number[]; ref_q?: number[] }
-  | { type: "line"; x: number[]; series: Record<string, (number | null)[]>; xlabel?: string; ylabel?: string; bars?: boolean }
-  | { type: "eye"; t: number[]; traces: number[][] }
-  | { type: "heatmap"; z: number[][]; xlabel?: string; ylabel?: string }
+  | { type: "scatter"; i: number[]; q: number[]; unit?: string; ref_i?: number[]; ref_q?: number[] }
+  | {
+      type: "line"; x: number[]; series: Record<string, (number | null)[]>;
+      xlabel?: string; xunit?: string; ylabel?: string; yunit?: string; bars?: boolean;
+    }
+  | { type: "eye"; t: number[]; tunit: string; ui: number; traces: number[][]; unit?: string }
+  | { type: "heatmap"; z: number[][]; xlabel?: string; ylabel?: string; zunit?: string }
   | { type: "message"; text: string };
+
+export type BlockResponse =
+  | { available: false; reason: string }
+  | {
+      available: true; source: "model" | "estimate"; doc: string; f: number[];
+      magnitude_db: (number | null)[]; phase_deg: (number | null)[]; group_delay_s: (number | null)[];
+    };
 
 export type ProbeResult = PlotData & { view?: string; views?: string[]; kind?: string };
 
@@ -134,6 +154,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<{ status: string; version: string; cpu_count: number }>("/api/health"),
   catalogue: () => request<Catalogue>("/api/blocks"),
   scenarios: () => request<ScenarioItem[]>("/api/scenarios"),
   loadScenario: (path: string) => request<EditorGraph>(`/api/scenarios/${path}`),
@@ -147,6 +168,8 @@ export const api = {
     request<{ positions: Record<string, { x: number; y: number }> }>("/api/layout", { method: "POST", body: JSON.stringify(graph) }),
   exportPython: (graph: EditorGraph) =>
     request<{ code: string }>("/api/export/python", { method: "POST", body: JSON.stringify(graph) }),
+  response: (graph: EditorGraph, block: string) =>
+    request<BlockResponse>("/api/response", { method: "POST", body: JSON.stringify({ graph, block }) }),
   cancelJob: (id: string) => request<{ ok: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
 };
 

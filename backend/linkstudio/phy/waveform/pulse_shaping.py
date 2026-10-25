@@ -35,6 +35,14 @@ class PulseShaper(Block):
         p = self.params
         self.taps = design_pulse(p.shape, p.sps, p.span, p.rolloff, p.bt)
 
+    def frequency_response(self, f: np.ndarray, x: Signal) -> np.ndarray | None:
+        """DTFT of the pulse taps at the output sample rate (sps x symbol rate)."""
+        if not x.fs:
+            return None
+        n = np.arange(len(self.taps))
+        h = np.exp(-2j * np.pi * np.multiply.outer(np.asarray(f) / (x.fs * self.params.sps), n)) @ self.taps
+        return h / (np.abs(h[np.argmin(np.abs(f))]) or 1.0)
+
     def process(self, inputs: dict[str, Signal], ctx: RunContext) -> dict[str, Signal]:
         x = inputs["in"]
         sps = self.params.sps

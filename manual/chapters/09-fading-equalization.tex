@@ -37,14 +37,18 @@ Doppler spectrum
   S_h(f)=\frac{1}{\pi f_D\sqrt{1-(f/f_D)^2}},\ |f|<f_D .
   \label{eq:jakes}
 \end{equation}
-LinkStudio generates it with a random-phase sum of sinusoids:
+LinkStudio generates it with the sum-of-sinusoids model of Zheng and Xiao~\cite{zheng2003}:
 \begin{equation}
-  h[n]=\frac{1}{\sqrt{N}}\sum_{i=1}^{N}e^{\,j(2\pi f_D\cos\alpha_i\,n/f_s+\phi_i)},\qquad
-  \alpha_i,\phi_i\sim\mathcal U[0,2\pi).
+  h[n]=\sqrt{\tfrac{2}{M}}\sum_{i=1}^{M}\big(\cos\psi_i+j\sin\psi_i\big)\cos\!\big(2\pi f_D\cos\alpha_i\,n/f_s+\phi\big),
+  \qquad \alpha_i=\frac{2\pi i-\pi+\theta}{4M},
 \end{equation}
-Each term has autocorrelation $\E_\alpha e^{j2\pi f_D\cos\alpha\,\tau}=J_0(2\pi f_D\tau)$, so
-the sum reproduces \cref{eq:jakes} exactly in expectation. Its first-order statistics approach
-Gaussian as $N$ grows (16 sinusoids by default).
+with $\theta$, $\phi$ and the $\psi_i$ independent and uniform on $[-\pi,\pi)$. Jakes' original
+deterministic model is not stationary. Fully random arrival angles are stationary but need many
+sinusoids before a single realization behaves like the ensemble. The Zheng--Xiao choice spreads
+the $M$ angles evenly over a quarter circle with one random offset. The process is wide-sense
+stationary, $E|h|^2=1$, the in-phase and quadrature parts are uncorrelated, and the
+autocorrelation matches \cref{eq:jakes} closely with only $M=8$ to 16 sinusoids (16 by default).
+The test suite checks $R_h$ against $J_0$ to within 0.02 and the I/Q cross-correlation.
 \codeexcerpt{sos}{Sum-of-sinusoids Rayleigh process (\file{channel/fading.py}).}
 
 \begin{figure}[htbp]
@@ -80,11 +84,16 @@ output (\meta{csi_type}\code{="gain"}). Three time-variation modes are available
 
 % ------------------------------------------------------------------
 \section{Tapped delay lines and 3GPP profiles}
-\blk{multipath} implements the discrete model
-$y[n]=\sum_{l}h_l[n]\,x[n-d_l]$ with integer sample delays $d_l=\mathrm{round}(\tau_lf_s)$.
-Taps falling on the same sample have their powers added, and the profile is normalized to unit
-total power. Taps are Rayleigh (or static with \prm{fading}\code{=false}), constant per frame or
-each with an independent Jakes process. The 3GPP extended models of TS~36.104~\cite{3gpp36104} are built in:
+\blk{multipath} implements $y(t)=\sum_l h_l(t)\,x(t-\tau_l)$ on the sample grid. A delay
+$\tau_lf_s$ that is not an integer cannot be applied by shifting samples. Rounding it would merge
+taps: at LTE rates (15.36--30.72\,MHz) the EPA taps at 30, 70, 90 and 110\,ns fall onto two
+samples, and the frequency correlation of the channel changes. The block therefore applies each
+path through a band-limited fractional delay: a Hann-windowed sinc of $\pm8$ samples, normalized
+to unit energy. Over 75\,\% of the Nyquist band it delays by the exact fractional amount within
+5\,\% (checked in the tests). Integer delays stay single taps, and \prm{fractional_delays}\code{=false}
+restores rounding. The profile is normalized to unit total power. Taps are Rayleigh (or static
+with \prm{fading}\code{=false}), constant per frame or each with an independent Doppler
+process. The 3GPP extended models of TS~36.104~\cite{3gpp36104} are built in:
 
 \begin{center}\small
 \begin{tabular}{@{}lll@{}}
@@ -97,9 +106,80 @@ ETU & 0, 50, 120, 200, 230, 500, 1600, 2300, 5000 & $-1$, $-1$, $-1$, 0, 0, 0, $
 \bottomrule
 \end{tabular}
 \end{center}
-Their RMS delay spreads are 43, 357 and 991\,ns. The channel impulse response is published
-on \code{csi}: \meta{csi_type}\code{="cir"} with shape $(B,L)$ for block fading, or
-\code{"cir_tv"} with shape $(B,L,n)$ for time-varying taps.
+Their RMS delay spreads are 43, 357 and 991\,ns.
+
+\paragraph{5G NR profiles.} TR~38.901 \S7.7.2~\cite{tr38901} defines TDL-A, B and C (NLOS) and
+TDL-D and E (LOS) with normalized delays: the tabulated profiles have unit RMS delay spread. The
+delays are scaled to the wanted spread $\mathrm{DS}$ (\prm{delay_spread_ns}, from 10\,ns
+``very short'' to 1000\,ns ``very long''), $\tau_n=\tau_{n,\mathrm{model}}\,\mathrm{DS}$. Computing
+the RMS spread of the transcribed tables gives 1.000 for A, B, C and E and 0.994 for D, a check on
+the 23--24 tap values that the tests repeat. In TDL-D and TDL-E the first tap holds a LOS path
+(power $-0.2$\,dB and $-0.03$\,dB) on top of a Rayleigh component at the same delay. The block
+gives the LOS path a fixed amplitude with random phase; in \prm{jakes} mode it also has the
+Doppler shift $0.7f_D$ of the standard. The first tap is then Ricean with $K_1=13.3$\,dB (TDL-D) or
+22\,dB (TDL-E). The tests estimate $K_1$ from 4000 frames and recover 13.3\,dB within 1\,dB.
+
+The channel impulse response is published on \code{csi}: \meta{csi_type}\code{="cir"} with shape
+$(B,L)$ for block fading, or \code{"cir_tv"} with shape $(B,L,n)$ for time-varying taps.
+\codeexcerpt{delay_kernel}{Band-limited fractional delay used for every tap.}
+
+% ------------------------------------------------------------------
+\section{Path loss and link budgets}\label{sec:path-loss}
+Fading describes fluctuations around a mean received power. The mean itself follows from the
+distance through the path loss. \blk{path_loss} offers four models.
+\begin{itemize}
+  \item \textbf{Free space} (ITU-R P.525~\cite{p525}):
+  $L=20\log_{10}(4\pi d f_c/c)$, i.e. $32.45+20\log_{10}f_{\mathrm{MHz}}+20\log_{10}d_{\mathrm{km}}$\,dB.
+  \item \textbf{UMa, UMi street canyon, InH office} (TR~38.901 Table 7.4.1-1~\cite{tr38901}), $f_c$ in
+  GHz and $d_{3D}$ in metres. LOS uses a dual-slope law. In UMi, for example,
+  \begin{equation}
+    \mathrm{PL}_{\mathrm{LOS}}=\begin{cases}32.4+21\log_{10}d_{3D}+20\log_{10}f_c, & d_{2D}\le d'_{\mathrm{BP}}\\
+    32.4+40\log_{10}d_{3D}+20\log_{10}f_c\\
+    \quad-9.5\log_{10}\big(d'^2_{\mathrm{BP}}+(h_{\mathrm{BS}}-h_{\mathrm{UT}})^2\big), & d_{2D}>d'_{\mathrm{BP}}\end{cases}
+  \end{equation}
+  with breakpoint $d'_{\mathrm{BP}}=4h'_{\mathrm{BS}}h'_{\mathrm{UT}}f_c/c$ and effective heights
+  $h'=h-1$\,m. This is the distance at which the ground-reflected ray starts cancelling the direct
+  one, so the slope changes from about 2 to 4. NLOS is the larger of the LOS value and a
+  steeper NLOS law, e.g. $35.3\log_{10}d_{3D}+22.4+21.3\log_{10}f_c-0.3(h_{\mathrm{UT}}-1.5)$ for UMi.
+  Shadow fading is log-normal with $\sigma_{\mathrm{SF}}=4$/7.82\,dB (UMi LOS/NLOS), 4/6\,dB (UMa)
+  and 3/8.03\,dB (InH).
+\end{itemize}
+With \prm{condition}\code{=probabilistic} each frame is LOS with the probability of Table 7.4.2-1,
+e.g. $P_{\mathrm{LOS}}=18/d+e^{-d/36}(1-18/d)$ for UMi beyond 18\,m. The UMa breakpoint uses
+$h_E=1$\,m, the standard's value for user heights below 13\,m.
+\codeexcerpt{tr38901}{Path loss and shadow-fading standard deviation of TR~38.901.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogxaxis}[width=11cm,height=6.2cm,xlabel={2-D distance [m]},ylabel={path loss [dB]},
+  xmin=10,xmax=1000,ymin=50,ymax=150,legend style={font=\scriptsize,at={(0.02,0.98)},anchor=north west},
+  legend columns=2]
+  \addplot[th=black!60,dashed] table[x=d,y=fs]{\datafile{pathloss}};
+  \addplot[th=accent] table[x=d,y=uma_los]{\datafile{pathloss}};
+  \addplot[th=accent,dotted,thick] table[x=d,y=uma_nlos]{\datafile{pathloss}};
+  \addplot[th=accent2] table[x=d,y=umi_los]{\datafile{pathloss}};
+  \addplot[th=accent2,dotted,thick] table[x=d,y=umi_nlos]{\datafile{pathloss}};
+  \addplot[sim=accent3,mark size=1.3pt] table[x=d,y=umi_sim]{\datafile{pathloss}};
+  \legend{free space,UMa LOS,UMa NLOS,UMi LOS,UMi NLOS,{UMi block, mean}}
+\end{semilogxaxis}
+\end{tikzpicture}
+\caption{TR~38.901 path loss at 3.5\,GHz with default heights (UMa 25\,m, UMi 10\,m, UT 1.5\,m).
+The UMa LOS curve bends at the breakpoint $d'_{\mathrm{BP}}\approx560$\,m (UMi: 210\,m). Markers:
+mean loss of \blk{path_loss} (UMi, probabilistic LOS, shadowing on, 4000 frames). Close to the
+base station they follow LOS; far away, NLOS.}
+\label{fig:pathloss}
+\end{figure}
+
+\paragraph{Absolute noise.} A link budget needs the noise in watts. \blk{awgn} in
+\prm{mode}\code{=thermal} adds $N_0=k_BTF$ per hertz, i.e. variance $k_BTF\,f_s$ per complex
+sample, with noise figure $F$ (\prm{noise_figure_db}) and $T=290$\,K. The signal must then carry
+absolute power. The mapper's unit power is read as 1\,W (30\,dBm) and the transmit power is set
+with \blk{gain} (\prm{gain_db}\,=\,$P_{\mathrm{tx}}$[dBm]$-30$). At one sample per symbol
+$E_s/N_0=P_{\mathrm{rx}}/(k_BTFR_s)$. A test runs QPSK at 7\,dBm over 2\,km of free space at
+2.4\,GHz into a 5\,dB noise figure and checks the BER against theory at that $E_s/N_0$. The
+\emph{Urban micro-cell link budget} scenario combines \blk{path_loss} and thermal noise: sweep the
+distance and watch the LOS fraction and the frame error rate.
 
 % ------------------------------------------------------------------
 \section{Error probability with fading}\label{sec:rayleigh-ber}

@@ -24,10 +24,10 @@ For frontend development with hot reload, run the API with
 
 | area | what it does |
 |------|--------------|
-| **Top bar** | scenario browser (click the scenario name or Ctrl+O), New, Save / Save as, undo / redo, automatic layout, Export .py, batch size, seed, validation status |
+| **Top bar** | scenario browser (click the scenario name or Ctrl+O), New, Save / Save as, undo / redo, automatic layout, Export .py, seed, validation status |
 | **Blocks (left)** | the 86 blocks grouped by category (including wireline and optical); search, drag onto the canvas or double-click to add |
-| **Canvas (centre)** | the communication chain. Connect an output (right side of a block) to an input (left side). Handle and edge colors show the signal kind; incompatible connections are refused. Dashed handles are optional inputs. Delete / Backspace removes the selection |
-| **Inspector (right)** | rename the selected block, edit its parameters (forms generated from the block schema, sliders for dB values and bounded parameters, `auto` for values taken from upstream metadata) and tick outputs to probe. With nothing selected it shows the scenario name, description and validation errors |
+| **Canvas (centre)** | the communication chain. Connect an output (right side of a block by default) to an input (left side). Handle and edge colors show the signal kind; incompatible connections are refused. Dashed handles are optional inputs. Links are routed with orthogonal segments around the blocks, never behind them. Delete / Backspace removes the selection |
+| **Inspector (right)** | rename the selected block, edit its parameters (forms generated from the block schema, sliders for dB values and bounded parameters, `auto` for values taken from upstream metadata) and tick outputs to probe. Linear blocks (cables, CTLE, lasers and VCSELs, photodiodes, fibers, pulse shapers) also show their frequency response (magnitude, phase or group delay); random multipath channels show an estimate of one realization. With nothing selected it shows the scenario name, description and validation errors |
 | **Bottom panel** | Live, Simulate and Sweep modes (drag its top edge to resize) |
 
 Signal-kind colors: bits (purple), LLRs (pink), symbols (green), samples (blue),
@@ -39,7 +39,12 @@ OFDM grid (amber), CSI (red).
 * Ctrl+C / Ctrl+V copy and paste blocks together with the connections between them;
   Ctrl+D (or the Duplicate button) duplicates the selection.
 * Ctrl+Z / Ctrl+Y undo and redo any change (blocks, connections, parameters, positions, probes).
-* Ctrl+L (Layout) arranges the blocks automatically.
+* Ctrl + drag a port to move it anywhere on the block border (any side). Useful for
+  feedback paths and chains that run right to left; the places are saved in the scenario.
+* While a block is dragged it snaps so that its connected ports line up with the other end
+  (straight links), or so that its edges / centre line up with a neighbouring block; a yellow
+  guide shows the alignment.
+* Ctrl+L (Layout) arranges the blocks automatically and straightens single-input links.
 * Export .py downloads a standalone script that rebuilds and runs the scenario with the
   Python API, a good starting point for automation.
 * The run buttons are disabled while the graph is invalid; the reason is shown next to them.
@@ -47,17 +52,31 @@ OFDM grid (amber), CSI (red).
 ## Modes
 
 ### Live
-Runs the chain batch after batch (1–30 Hz) and streams every probe as a scope:
+Simulates one frame per step (batch size 1) at 1–30 steps per second and streams every probe as a scope:
 constellation, spectrum, eye diagram, time series, LLR histogram, OFDM grid, channel
 response. Parameter changes in the inspector are applied **while running** and the
 metrics restart automatically, so moving `awgn.snr_db` or a PA backoff shows the effect
 immediately. Structural changes (new blocks or connections) restart the session
-automatically.
+automatically. The rate only sets how often the scopes refresh; the metrics accumulate
+across frames.
+
+Scope axes carry physical units with SI prefixes (ps, GHz, mA, ...): time and frequency
+whenever the sample rate is known, amplitude in √W for optical fields and A for
+photocurrents (normalized signals have no unit). Spectra are absolute PSDs (dBm/Hz for
+optical fields). The eye diagram is centred on the mean of the traces and spans all of
+them; the unit interval is printed in the corner.
 
 ### Simulate
 Monte-Carlo run in the background: a fixed number of batches or "until a metric reaches
 a threshold" (e.g. `ber.bit_errors >= 200`). Shows the final metrics (BER with its 95 %
 confidence interval) and the probes of the last batch.
+
+* **frames/batch**: independent frames simulated together per batch (vectorized; saved
+  in the scenario as `batch_size`).
+* **cores**: worker processes. Batches run in parallel on several CPU cores, each seeded
+  from (seed, batch index), so the result does not depend on the number of cores. In a
+  sweep, the points run in parallel and give exactly the serial results. The value is
+  remembered by the browser.
 
 ### Sweep
 Runs the simulation for every value of a parameter (`start:step:stop` or a list), with

@@ -75,6 +75,12 @@ class Subsystem(Block):
     def metrics(self) -> dict[str, float]:
         return self.graph.metrics()
 
+    def export_state(self) -> dict[str, Any]:
+        return self.graph.export_state()
+
+    def merge_state(self, state: Mapping[str, Any]) -> None:
+        self.graph.merge_state(state)
+
     def to_spec(self) -> dict[str, Any]:
         from linkstudio.core.scenario import graph_to_dict
 

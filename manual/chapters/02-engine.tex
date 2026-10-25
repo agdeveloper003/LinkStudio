@@ -236,6 +236,25 @@ stop once 100 errors have been counted. \Cref{sec:mc} shows why this gives a rel
 accuracy of about $\pm20\,\%$ independent of the BER itself. \code{run} also accepts an
 \code{on_batch} callback, which the web server uses to report progress and to cancel jobs.
 
+\subsection{Multi-core runs}\label{sec:parallel}
+\code{run(..., workers=N)} spreads the batches over $N$ worker processes
+(\file{core/parallel.py}); \code{Sweep.run(workers=N)} simulates $N$ points at a time. A pool
+with one process per CPU core is started on first use and then shared by all runs. Batches are
+sent in chunks sized to take about 0.1\,s, which keeps the inter-process overhead small.
+
+Each worker rebuilds the graph from its specification, and batch $k$ is seeded from
+$(\text{seed},k)$. The worker returns the accumulator state of every block
+(\code{Graph.export_state}: the attributes set by \code{on_reset} plus \code{\_last*} values). The
+coordinator merges the states in batch order into its own copy of the graph
+(\code{merge_state}: numbers add up, lists are concatenated, \code{\_last*} values are replaced)
+and checks the stop criterion after every merged batch. The result therefore depends neither
+on the number of workers nor on the order in which batches finish:
+\codeexcerpt{parallel_merge}{Batches are merged in order; the stop rule sees the same sequence as in a serial run.}
+A parallel run is reproducible, but it is a different random realization from the serial run
+with the same seed, where each block draws all batches from one stream. Blocks that keep
+memory from one batch to the next restart at every batch. Sweep points are independent serial
+runs, so a parallel sweep returns exactly the records of a serial one.
+
 % ------------------------------------------------------------------
 \section{Sweeps}\label{sec:sweeps}
 A \code{Sweep} (\file{core/sweep.py}) runs a fresh simulation at every point of a parameter

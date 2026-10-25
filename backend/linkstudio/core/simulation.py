@@ -101,7 +101,8 @@ class Simulation:
 
     def run(self, n_batches: int | None = None, stop: StopCriteria | None = None,
             capture: Iterable[str] | str = (), reset: bool = True, progress: bool = False,
-            on_batch: Callable[[int, dict[str, float]], bool | None] | None = None) -> SimulationResult:
+            on_batch: Callable[[int, dict[str, float]], bool | None] | None = None,
+            workers: int = 1) -> SimulationResult:
         """Run until the stop criterion is met.
 
         Args:
@@ -112,6 +113,8 @@ class Simulation:
             progress: Print a line per batch.
             on_batch: Called after every batch with ``(n_batches, metrics)``; returning
                 ``False`` cancels the run.
+            workers: Worker processes. Above 1, batches run on several CPU cores
+                (see :mod:`linkstudio.core.parallel`); ``reset`` is then implied.
         """
         if n_batches is not None and stop is not None:
             raise ValueError("Pass either n_batches or stop, not both.")
@@ -123,6 +126,23 @@ class Simulation:
         keys = [capture] if isinstance(capture, str) else list(capture)
 
         start = time.perf_counter()
+        if workers > 1:
+            from linkstudio.core.parallel import run_batches
+
+            def done(n: int, metrics: dict[str, float]) -> str | None:
+                reason = stop.check(n, time.perf_counter() - start, metrics)
+                if on_batch is not None and on_batch(n, metrics) is False:
+                    reason = "cancelled"
+                return reason
+
+            self.reset()
+            n_done, reason, captures = run_batches(self.graph, self.batch_size, self.seed, workers, done, keys,
+                                                    stop.max_batches)
+            missing = [k for k in keys if k != "*" and k not in captures]
+            if missing:
+                raise GraphError(f"Cannot capture {missing}. Available: {sorted(captures)}")
+            return SimulationResult(self.graph.metrics(), n_done, time.perf_counter() - start, reason, captures)
+
         n_done = 0
         while True:
             values = self.step()
