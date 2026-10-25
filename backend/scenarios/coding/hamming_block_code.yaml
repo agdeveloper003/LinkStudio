@@ -1,17 +1,82 @@
 name: Hamming code, hard decisions
 category: Coding
-description: Systematic Hamming(7,4) single-error-correcting code with syndrome decoding on BPSK.
-  Change enc.m and dec.m together (3 to 6) to trade rate for protection.
+description: Systematic Hamming(7,4) single-error-correcting code with syndrome decoding
+  on BPSK. Change enc.m and dec.m together (3 to 6) to trade rate for protection.
 seed: 1
 batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 1000}}
-  enc: {type: hamming_encoder, params: {m: 3}}
-  map: {type: mapper, params: {scheme: psk, order: 2}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 7.0}}
-  demap: {type: demapper, params: {method: hard}}
-  dec: {type: hamming_decoder, params: {m: 3}}
-  ber: {type: ber_meter}
-chain: [src, enc, map, awgn, demap, dec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 1000
+  enc:
+    type: hamming_encoder
+  map:
+    type: mapper
+    params:
+      scheme: psk
+      order: 2
+  awgn:
+    type: awgn
+    params:
+      snr_db: 7.0
+  demap:
+    type: demapper
+    params:
+      method: hard
+  dec:
+    type: hamming_decoder
+  ber:
+    type: ber_meter
 edges:
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> map.in
+- map.out -> awgn.in
+- awgn.out -> demap.in
+- demap.out -> dec.in
+- dec.out -> ber.rx
+- src.out -> ber.tx
+layout:
+  src:
+  - 40.0
+  - 66.0
+  enc:
+  - 354.0
+  - 74.0
+  map:
+  - 632.0
+  - 40.0
+  awgn:
+  - 935.0
+  - 107.0
+  demap:
+  - 892.0
+  - 347.0
+  dec:
+  - 624.0
+  - 347.0
+  ber:
+  - 352.0
+  - 328.0
+port_layout:
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

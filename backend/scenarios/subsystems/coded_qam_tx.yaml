@@ -1,13 +1,38 @@
-# Transmitter: bits -> K=7 r=1/2 convolutional code -> random interleaver -> 16-QAM.
-# (4000 + 6 tail bits) * 2 = 8012 coded bits = 2003 symbols.
 name: coded_qam_tx
+seed: 0
+batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  enc: {type: conv_encoder, params: {generators: [171, 133], constraint_length: 7}}
-  il:  {type: interleaver, params: {kind: random, seed: 7}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-chain: [src, enc, il, map]
-
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  enc:
+    type: conv_encoder
+  il:
+    type: interleaver
+    params:
+      seed: 7
+  map:
+    type: mapper
+    params:
+      order: 16
+edges:
+- src.out -> enc.in
+- enc.out -> il.in
+- il.out -> map.in
 outputs:
   bits: src.out
   symbols: map.out
+layout:
+  src:
+  - 40.0
+  - 66.0
+  enc:
+  - 352.0
+  - 74.0
+  il:
+  - 620.0
+  - 74.0
+  map:
+  - 888.0
+  - 40.0

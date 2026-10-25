@@ -1,30 +1,155 @@
 name: OFDM timing and CFO synchronization
 category: Wireless
 description: An unknown delay and a carrier frequency offset destroy OFDM orthogonality.
-  The blind cyclic-prefix correlator finds the symbol start and the fractional CFO. Remove the
-  sync block to see the receiver fail.
+  The blind cyclic-prefix correlator finds the symbol start and the fractional CFO.
+  Remove the sync block to see the receiver fail.
 seed: 1
 batch_size: 8
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-  ofdm: {type: ofdm_modulator, params: {n_fft: 64, cp_len: 16, n_active: 52, pilot_spacing: 4, subcarrier_spacing: 312500.0, tail_zeros: 80}}
-  tim: {type: timing_offset, params: {delay_samples: 37.0}}
-  cfo: {type: carrier_offset, params: {cfo_hz: 60000.0, random_phase: true}}
-  awgn: {type: awgn, params: {mode: esn0, snr_db: 22.0}}
-  sync: {type: ofdm_sync}
-  demod: {type: ofdm_demodulator}
-  est: {type: ofdm_channel_estimator}
-  eq: {type: ofdm_equalizer}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-chain: [src, map, ofdm, tim, cfo, awgn, sync, demod, est]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      order: 16
+  ofdm:
+    type: ofdm_modulator
+    params:
+      pilot_spacing: 4
+      subcarrier_spacing: 312500.0
+      tail_zeros: 80
+  tim:
+    type: timing_offset
+    params:
+      delay_samples: 37.0
+  cfo:
+    type: carrier_offset
+    params:
+      cfo_hz: 60000.0
+      random_phase: true
+  awgn:
+    type: awgn
+    params:
+      snr_db: 22.0
+      mode: esn0
+  sync:
+    type: ofdm_sync
+  demod:
+    type: ofdm_demodulator
+  est:
+    type: ofdm_channel_estimator
+  eq:
+    type: ofdm_equalizer
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
 edges:
-  - demod.out -> eq.in
-  - est.out -> eq.csi
-  - eq.out -> demap.in
-  - demap.out -> ber.rx
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> ofdm.in
+- ofdm.out -> tim.in
+- tim.out -> cfo.in
+- cfo.out -> awgn.in
+- awgn.out -> sync.in
+- sync.out -> demod.in
+- demod.out -> est.in
+- demod.out -> eq.in
+- est.out -> eq.csi
+- eq.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: awgn.out, view: spectrum}
-  - {key: eq.out, view: constellation}
+- key: awgn.out
+  view: spectrum
+- key: eq.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 360.0
+  - 40.0
+  ofdm:
+  - 620.0
+  - 74.0
+  tim:
+  - 931.0
+  - 121.0
+  cfo:
+  - 1199.0
+  - 121.0
+  awgn:
+  - 1467.0
+  - 107.0
+  sync:
+  - 1424.0
+  - 347.0
+  demod:
+  - 1156.0
+  - 347.0
+  est:
+  - 888.0
+  - 368.0
+  eq:
+  - 620.0
+  - 368.0
+  demap:
+  - 352.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+port_layout:
+  sync:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demod:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  est:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  eq:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

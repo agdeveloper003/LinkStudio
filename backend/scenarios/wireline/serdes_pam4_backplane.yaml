@@ -1,28 +1,167 @@
 name: SerDes 25 GBd PAM-4 backplane
 category: Wireline
-description: 50 Gb/s PAM-4 over a 0.8 m PCB backplane trace. The CTLE boosts high frequencies and
-  the adaptive FFE/DFE removes the remaining ISI. Try removing the CTLE peaking or adding jitter.
+description: 50 Gb/s PAM-4 over a 0.8 m PCB backplane trace. The CTLE boosts high
+  frequencies and the adaptive FFE/DFE removes the remaining ISI. Try removing the
+  CTLE peaking or adding jitter.
 seed: 1
 batch_size: 8
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  map: {type: mapper, params: {scheme: pam, order: 4, symbol_rate: 25000000000.0}}
-  tx: {type: pulse_shaper, params: {shape: rc, sps: 8, rolloff: 0.5, span: 8}}
-  ch: {type: copper_line, params: {preset: backplane, length_m: 0.8}}
-  jit: {type: jitter, params: {rj_rms_ui: 0.01}}
-  awgn: {type: awgn, params: {mode: snr, snr_db: 30.0}}
-  ctle: {type: ctle, params: {zero_hz: 2000000000.0, pole1_hz: 12000000000.0, pole2_hz: 40000000000.0}}
-  rx: {type: matched_filter, params: {shape: none}}
-  agc: {type: agc, params: {remove_dc: false}}
-  dfe: {type: dfe_equalizer}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter, params: {skip_bits: 800}}
-chain: [src, map, tx, ch, jit, awgn, ctle, rx, agc, dfe, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      scheme: pam
+      symbol_rate: 25000000000.0
+  tx:
+    type: pulse_shaper
+    params:
+      shape: rc
+      span: 8
+      rolloff: 0.5
+  ch:
+    type: copper_line
+    params:
+      preset: backplane
+      length_m: 0.8
+  jit:
+    type: jitter
+    params:
+      rj_rms_ui: 0.01
+  awgn:
+    type: awgn
+    params:
+      snr_db: 30.0
+      mode: snr
+  ctle:
+    type: ctle
+    params:
+      zero_hz: 2000000000.0
+      pole1_hz: 12000000000.0
+      pole2_hz: 40000000000.0
+  rx:
+    type: matched_filter
+    params:
+      shape: none
+  agc:
+    type: agc
+    params:
+      remove_dc: false
+  dfe:
+    type: dfe_equalizer
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+    params:
+      skip_bits: 800
 edges:
-  - map.out -> dfe.ref
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> tx.in
+- tx.out -> ch.in
+- ch.out -> jit.in
+- jit.out -> awgn.in
+- awgn.out -> ctle.in
+- ctle.out -> rx.in
+- rx.out -> agc.in
+- agc.out -> dfe.in
+- dfe.out -> demap.in
+- demap.out -> ber.rx
+- map.out -> dfe.ref
+- src.out -> ber.tx
 probes:
-  - {key: awgn.out, view: eye}
-  - {key: ctle.out, view: eye}
-  - {key: agc.out, view: time}
-  - {key: dfe.out, view: time}
+- key: awgn.out
+  view: eye
+- key: ctle.out
+  view: eye
+- key: agc.out
+  view: time
+- key: dfe.out
+  view: time
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 360.0
+  - 40.0
+  tx:
+  - 620.0
+  - 74.0
+  ch:
+  - 888.0
+  - 111.0
+  jit:
+  - 1130.0
+  - 74.0
+  awgn:
+  - 1441.0
+  - 107.0
+  ctle:
+  - 1398.0
+  - 347.0
+  rx:
+  - 1130.0
+  - 347.0
+  agc:
+  - 911.0
+  - 384.0
+  dfe:
+  - 620.0
+  - 368.0
+  demap:
+  - 352.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+port_layout:
+  ctle:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  rx:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dfe:
+    in:in:
+    - right
+    - 0.25
+    in:ref:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

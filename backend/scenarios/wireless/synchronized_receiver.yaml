@@ -1,28 +1,171 @@
 name: Synchronized QPSK receiver
 category: Wireless
-description: Unknown delay, carrier frequency offset and phase noise recovered by timing recovery,
-  preamble-based frame sync and a decision-directed PLL. Compare the three constellations.
+description: Unknown delay, carrier frequency offset and phase noise recovered by
+  timing recovery, preamble-based frame sync and a decision-directed PLL. Compare
+  the three constellations.
 seed: 3
 batch_size: 16
 blocks:
-  src: {type: random_bits, params: {n_bits: 2000}}
-  map: {type: mapper, params: {scheme: psk, order: 4, symbol_rate: 1000000.0}}
-  pre: {type: preamble, params: {length: 64, guard: 16}}
-  tx: {type: pulse_shaper, params: {sps: 4, rolloff: 0.35}}
-  tim: {type: timing_offset, params: {delay_samples: 9.37}}
-  cfo: {type: carrier_offset, params: {cfo_hz: 3000.0, random_phase: true}}
-  pn: {type: phase_noise, params: {linewidth_hz: 10.0}}
-  awgn: {type: awgn, params: {snr_db: 12.0}}
-  mf: {type: matched_filter, params: {decimate: false}}
-  tr: {type: timing_recovery}
-  fs: {type: frame_sync}
-  cr: {type: carrier_recovery}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-chain: [src, map, pre, tx, tim, cfo, pn, awgn, mf, tr, fs, cr, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 2000
+  map:
+    type: mapper
+    params:
+      scheme: psk
+  pre:
+    type: preamble
+  tx:
+    type: pulse_shaper
+    params:
+      sps: 4
+      rolloff: 0.35
+  tim:
+    type: timing_offset
+    params:
+      delay_samples: 9.37
+  cfo:
+    type: carrier_offset
+    params:
+      cfo_hz: 3000.0
+      random_phase: true
+  pn:
+    type: phase_noise
+    params:
+      linewidth_hz: 10.0
+  awgn:
+    type: awgn
+    params:
+      snr_db: 12.0
+  mf:
+    type: matched_filter
+    params:
+      decimate: false
+  tr:
+    type: timing_recovery
+  fs:
+    type: frame_sync
+  cr:
+    type: carrier_recovery
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
 edges:
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> pre.in
+- pre.out -> tx.in
+- tx.out -> tim.in
+- tim.out -> cfo.in
+- cfo.out -> pn.in
+- pn.out -> awgn.in
+- awgn.out -> mf.in
+- mf.out -> tr.in
+- tr.out -> fs.in
+- fs.out -> cr.in
+- cr.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: tr.out, view: constellation}
-  - {key: fs.out, view: constellation}
-  - {key: cr.out, view: constellation}
+- key: tr.out
+  view: constellation
+- key: fs.out
+  view: constellation
+- key: cr.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 360.0
+  - 40.0
+  pre:
+  - 620.0
+  - 74.0
+  tx:
+  - 888.0
+  - 74.0
+  tim:
+  - 1199.0
+  - 121.0
+  cfo:
+  - 1467.0
+  - 121.0
+  pn:
+  - 1692.0
+  - 121.0
+  awgn:
+  - 1692.0
+  - 380.0
+  mf:
+  - 1424.0
+  - 347.0
+  tr:
+  - 1156.0
+  - 347.0
+  fs:
+  - 888.0
+  - 347.0
+  cr:
+  - 620.0
+  - 347.0
+  demap:
+  - 352.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+port_layout:
+  awgn:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  mf:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  tr:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  fs:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  cr:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

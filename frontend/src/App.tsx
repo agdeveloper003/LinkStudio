@@ -15,7 +15,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { api, downloadText, type Catalogue, type PortPlace, type Probe, type ScenarioItem, type Validation } from "./api";
+import { api, downloadText, type Catalogue, type EditorGraph, type PortPlace, type Probe, type ScenarioItem, type Validation } from "./api";
 import { BlockNode } from "./components/BlockNode";
 import { Inspector } from "./components/Inspector";
 import { LivePanel } from "./components/LivePanel";
@@ -56,6 +56,12 @@ interface Meta {
   path: string;
   seed: number;
   batch_size: number;
+  /** Run settings stored in the scenario file, written back when it is saved. */
+  simulation?: EditorGraph["simulation"];
+  sweep?: EditorGraph["sweep"];
+  /** External ports, when the file is a subsystem definition. */
+  inputs?: EditorGraph["inputs"];
+  outputs?: EditorGraph["outputs"];
 }
 
 interface Snapshot {
@@ -160,7 +166,7 @@ export default function App() {
         setValidation(g.validation ?? null);
         setMeta({
           name: g.name, description: g.description ?? "", category: g.category ?? "", path: g.path ?? path,
-          seed: g.seed, batch_size: g.batch_size,
+          seed: g.seed, batch_size: g.batch_size, simulation: g.simulation, sweep: g.sweep, inputs: g.inputs, outputs: g.outputs,
         });
         setSelected(null);
         setBrowserOpen(false);

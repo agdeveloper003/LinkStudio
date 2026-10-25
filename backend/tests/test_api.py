@@ -77,6 +77,28 @@ def test_save_and_reload(client):
         shutil.rmtree(SCENARIO_DIR / "_pytest_tmp", ignore_errors=True)
 
 
+def test_save_keeps_run_settings_and_subsystem_ports(client):
+    """Saving from the editor writes back what the editor does not show: the sweep and
+    stop settings of a scenario and the external ports of a subsystem file."""
+    import shutil
+
+    import yaml
+
+    from linkstudio.api.app import SCENARIO_DIR
+
+    try:
+        for src in ("qpsk_awgn_sweep.yaml", "subsystems/coded_qam_rx.yaml"):
+            editor = client.get(f"/api/scenarios/{src}").json()
+            dst = f"_pytest_tmp/{src.replace('/', '_')}"
+            assert client.put(f"/api/scenarios/{dst}", json=editor).status_code == 200
+            before = yaml.safe_load((SCENARIO_DIR / src).read_text(encoding="utf-8"))
+            after = yaml.safe_load((SCENARIO_DIR / dst).read_text(encoding="utf-8"))
+            for key in ("sweep", "inputs", "outputs"):
+                assert after.get(key) == before.get(key), (src, key)
+    finally:
+        shutil.rmtree(SCENARIO_DIR / "_pytest_tmp", ignore_errors=True)
+
+
 def test_validate_reports_errors(client):
     g = simple_graph()
     g["edges"] = g["edges"][1:]

@@ -1,22 +1,104 @@
 name: 3 - Pulse shaping and the eye diagram
 category: Tutorials
-description: QPSK with root-raised-cosine shaping and a matched filter. Change tx.rolloff and
-  watch the spectrum width, or add a timing offset to close the eye.
+description: QPSK with root-raised-cosine shaping and a matched filter. Change tx.rolloff
+  and watch the spectrum width, or add a timing offset to close the eye.
 seed: 1
 batch_size: 16
 blocks:
-  src: {type: random_bits, params: {n_bits: 2000}}
-  map: {type: mapper, params: {scheme: psk, order: 4, symbol_rate: 1000000.0}}
-  tx: {type: pulse_shaper, params: {shape: rrc, sps: 8, rolloff: 0.35, span: 12}}
-  tim: {type: timing_offset, params: {delay_samples: 0.0}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 12.0}}
-  mf: {type: matched_filter}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-chain: [src, map, tx, tim, awgn, mf, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 2000
+  map:
+    type: mapper
+    params:
+      scheme: psk
+  tx:
+    type: pulse_shaper
+    params:
+      span: 12
+      rolloff: 0.35
+  tim:
+    type: timing_offset
+  awgn:
+    type: awgn
+    params:
+      snr_db: 12.0
+  mf:
+    type: matched_filter
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
 edges:
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> tx.in
+- tx.out -> tim.in
+- tim.out -> awgn.in
+- awgn.out -> mf.in
+- mf.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: tx.out, view: spectrum}
-  - {key: awgn.out, view: eye}
-  - {key: mf.out, view: constellation}
+- key: tx.out
+  view: spectrum
+- key: awgn.out
+  view: eye
+- key: mf.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 360.0
+  - 40.0
+  tx:
+  - 620.0
+  - 74.0
+  tim:
+  - 888.0
+  - 121.0
+  awgn:
+  - 888.0
+  - 380.0
+  mf:
+  - 620.0
+  - 347.0
+  demap:
+  - 352.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+port_layout:
+  awgn:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  mf:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

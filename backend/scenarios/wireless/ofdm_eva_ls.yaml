@@ -1,33 +1,154 @@
 name: OFDM over EVA multipath
 category: Wireless
-description: 16-QAM OFDM through a time-varying 3GPP EVA channel with LS pilot-based channel estimation.
-  Switch the estimator to 'perfect' or raise the Doppler to see the difference.
+description: 16-QAM OFDM through a time-varying 3GPP EVA channel with LS pilot-based
+  channel estimation. Switch the estimator to 'perfect' or raise the Doppler to see
+  the difference.
 seed: 2
 batch_size: 8
 blocks:
-  src: {type: random_bits, params: {n_bits: 8000}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-  ofdm: {type: ofdm_modulator, params: {n_fft: 128, cp_len: 16, n_active: 96, pilot_spacing: 4}}
-  ch: {type: multipath, params: {preset: EVA, variation: jakes, doppler_hz: 30.0}}
-  awgn: {type: awgn, params: {mode: esn0, snr_db: 25.0}}
-  demod: {type: ofdm_demodulator}
-  est: {type: ofdm_channel_estimator, params: {method: ls}}
-  eq: {type: ofdm_equalizer}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-  evm: {type: evm_meter}
-chain: [src, map, ofdm, ch, awgn, demod, est]
+  src:
+    type: random_bits
+    params:
+      n_bits: 8000
+  map:
+    type: mapper
+    params:
+      order: 16
+  ofdm:
+    type: ofdm_modulator
+    params:
+      n_fft: 128
+      n_active: 96
+      pilot_spacing: 4
+  ch:
+    type: multipath
+    params:
+      preset: EVA
+      variation: jakes
+      doppler_hz: 30.0
+  awgn:
+    type: awgn
+    params:
+      snr_db: 25.0
+      mode: esn0
+  demod:
+    type: ofdm_demodulator
+  est:
+    type: ofdm_channel_estimator
+  eq:
+    type: ofdm_equalizer
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+  evm:
+    type: evm_meter
 edges:
-  - demod.out -> eq.in
-  - est.out -> eq.csi
-  - ch.csi -> est.csi
-  - eq.out -> demap.in
-  - demap.out -> ber.rx
-  - src.out -> ber.tx
-  - map.out -> evm.ref
-  - eq.out -> evm.in
+- src.out -> map.in
+- map.out -> ofdm.in
+- ofdm.out -> ch.in
+- ch.out -> awgn.in
+- awgn.out -> demod.in
+- demod.out -> est.in
+- demod.out -> eq.in
+- est.out -> eq.csi
+- ch.csi -> est.csi
+- eq.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
+- map.out -> evm.ref
+- eq.out -> evm.in
 probes:
-  - {key: ofdm.out, view: spectrum}
-  - {key: est.out, view: csi}
-  - {key: eq.out, view: constellation}
-  - {key: demod.out, view: grid}
+- key: ofdm.out
+  view: spectrum
+- key: est.out
+  view: csi
+- key: eq.out
+  view: constellation
+- key: demod.out
+  view: grid
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 372.0
+  - 40.0
+  ofdm:
+  - 644.0
+  - 74.0
+  ch:
+  - 920.0
+  - 111.0
+  awgn:
+  - 1223.0
+  - 107.0
+  demod:
+  - 1180.0
+  - 347.0
+  est:
+  - 912.0
+  - 368.0
+  eq:
+  - 644.0
+  - 368.0
+  demap:
+  - 364.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+  evm:
+  - 352.0
+  - 536.0
+port_layout:
+  demod:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  est:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  eq:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75
+  evm:
+    in:ref:
+    - right
+    - 0.25
+    in:in:
+    - right
+    - 0.75

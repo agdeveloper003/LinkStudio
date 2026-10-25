@@ -1,38 +1,199 @@
 name: Wi-Fi-like OFDM (802.11a/g)
 category: Wireless
-description: 20 MHz OFDM with 64 subcarriers, rate-1/2 convolutional code, bit interleaving and
-  16-QAM over an indoor multipath channel, with blind CP-based timing and CFO synchronization
-  and pilot-based channel estimation.
+description: 20 MHz OFDM with 64 subcarriers, rate-1/2 convolutional code, bit interleaving
+  and 16-QAM over an indoor multipath channel, with blind CP-based timing and CFO
+  synchronization and pilot-based channel estimation.
 seed: 1
 batch_size: 8
 blocks:
-  src: {type: random_bits, params: {n_bits: 2994}}
-  enc: {type: conv_encoder}
-  il: {type: interleaver, params: {kind: random, seed: 11}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-  ofdm: {type: ofdm_modulator, params: {n_fft: 64, cp_len: 16, n_active: 52, pilot_spacing: 4, subcarrier_spacing: 312500.0, tail_zeros: 80}}
-  ch: {type: multipath, params: {delays: [0, 1, 2, 3, 5], powers_db: [0.0, -2.0, -4.0, -8.0, -12.0]}}
-  tim: {type: timing_offset, params: {delay_samples: 25.0}}
-  cfo: {type: carrier_offset, params: {cfo_hz: 30000.0, random_phase: true}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 14.0}}
-  sync: {type: ofdm_sync}
-  demod: {type: ofdm_demodulator}
-  est: {type: ofdm_channel_estimator, params: {method: ls}}
-  eq: {type: ofdm_equalizer}
-  demap: {type: demapper, params: {method: maxlog}}
-  dil: {type: interleaver, params: {kind: random, seed: 11, inverse: true}}
-  dec: {type: viterbi_decoder}
-  ber: {type: ber_meter}
-chain: [src, enc, il, map, ofdm, ch, tim, cfo, awgn, sync, demod, est]
+  src:
+    type: random_bits
+    params:
+      n_bits: 2994
+  enc:
+    type: conv_encoder
+  il:
+    type: interleaver
+    params:
+      seed: 11
+  map:
+    type: mapper
+    params:
+      order: 16
+  ofdm:
+    type: ofdm_modulator
+    params:
+      pilot_spacing: 4
+      subcarrier_spacing: 312500.0
+      tail_zeros: 80
+  ch:
+    type: multipath
+    params:
+      delays:
+      - 0.0
+      - 1.0
+      - 2.0
+      - 3.0
+      - 5.0
+      powers_db:
+      - 0.0
+      - -2.0
+      - -4.0
+      - -8.0
+      - -12.0
+  tim:
+    type: timing_offset
+    params:
+      delay_samples: 25.0
+  cfo:
+    type: carrier_offset
+    params:
+      cfo_hz: 30000.0
+      random_phase: true
+  awgn:
+    type: awgn
+    params:
+      snr_db: 14.0
+  sync:
+    type: ofdm_sync
+  demod:
+    type: ofdm_demodulator
+  est:
+    type: ofdm_channel_estimator
+  eq:
+    type: ofdm_equalizer
+  demap:
+    type: demapper
+  dil:
+    type: interleaver
+    params:
+      seed: 11
+      inverse: true
+  dec:
+    type: viterbi_decoder
+  ber:
+    type: ber_meter
 edges:
-  - demod.out -> eq.in
-  - est.out -> eq.csi
-  - eq.out -> demap.in
-  - demap.out -> dil.in
-  - dil.out -> dec.in
-  - dec.out -> ber.rx
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> il.in
+- il.out -> map.in
+- map.out -> ofdm.in
+- ofdm.out -> ch.in
+- ch.out -> tim.in
+- tim.out -> cfo.in
+- cfo.out -> awgn.in
+- awgn.out -> sync.in
+- sync.out -> demod.in
+- demod.out -> est.in
+- demod.out -> eq.in
+- est.out -> eq.csi
+- eq.out -> demap.in
+- demap.out -> dil.in
+- dil.out -> dec.in
+- dec.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: ofdm.out, view: spectrum}
-  - {key: est.out, view: csi}
-  - {key: eq.out, view: constellation}
+- key: ofdm.out
+  view: spectrum
+- key: est.out
+  view: csi
+- key: eq.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  enc:
+  - 352.0
+  - 74.0
+  il:
+  - 620.0
+  - 74.0
+  map:
+  - 896.0
+  - 40.0
+  ofdm:
+  - 1158.0
+  - 74.0
+  ch:
+  - 1428.0
+  - 111.0
+  tim:
+  - 1463.0
+  - 375.0
+  cfo:
+  - 1201.0
+  - 375.0
+  awgn:
+  - 931.0
+  - 361.0
+  sync:
+  - 620.0
+  - 328.0
+  demod:
+  - 352.0
+  - 328.0
+  est:
+  - 62.0
+  - 349.0
+  eq:
+  - 62.0
+  - 608.0
+  demap:
+  - 352.0
+  - 588.0
+  dil:
+  - 620.0
+  - 588.0
+  dec:
+  - 888.0
+  - 588.0
+  ber:
+  - 1156.0
+  - 569.0
+port_layout:
+  tim:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  cfo:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  awgn:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  sync:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demod:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  est:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25

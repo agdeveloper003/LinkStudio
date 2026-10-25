@@ -1,35 +1,220 @@
 name: Coherent DP-16QAM metro link
 category: Optical
-description: 256 Gb/s dual-polarization 16-QAM over 5 x 80 km with polarization rotation, a
-  500 MHz LO offset and 100 kHz lasers. Blind phase search handles the 16-QAM carrier phase.
+description: 256 Gb/s dual-polarization 16-QAM over 5 x 80 km with polarization rotation,
+  a 500 MHz LO offset and 100 kHz lasers. Blind phase search handles the 16-QAM carrier
+  phase.
 seed: 3
 batch_size: 4
 blocks:
-  src: {type: random_bits, params: {n_bits: 16000}}
-  map: {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 32000000000.0}}
-  dmx: {type: stream_demux, params: {n_streams: 2}}
-  tx: {type: pulse_shaper, params: {sps: 2, rolloff: 0.1, span: 32}}
-  mod: {type: iq_modulator, params: {power_dbm: 0.0, linewidth_hz: 100000.0}}
-  link: {type: optical_link, params: {n_spans: 5, span_km: 80.0, polarization_rotation: true}}
-  rx: {type: coherent_receiver, params: {frequency_offset_hz: 500000000.0, lo_linewidth_hz: 100000.0}}
-  cdc: {type: cd_compensation}
-  fo: {type: fo_compensation}
-  mf: {type: matched_filter, params: {decimate: false}}
-  agc: {type: agc, params: {remove_dc: false}}
-  eq: {type: adaptive_mimo_equalizer, params: {n_train: 1024}}
-  cpr: {type: phase_recovery, params: {ref_start: 1100}}
-  mux: {type: stream_mux}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter, params: {skip_bits: 9000}}
-  evm: {type: evm_meter, params: {skip_symbols: 2400}}
-chain: [src, map, dmx, tx, mod, link, rx, cdc, fo, mf, agc, eq, cpr, mux, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 16000
+  map:
+    type: mapper
+    params:
+      order: 16
+      symbol_rate: 32000000000.0
+  dmx:
+    type: stream_demux
+  tx:
+    type: pulse_shaper
+    params:
+      sps: 2
+      span: 32
+      rolloff: 0.1
+  mod:
+    type: iq_modulator
+  link:
+    type: optical_link
+    params:
+      polarization_rotation: true
+      n_spans: 5
+  rx:
+    type: coherent_receiver
+    params:
+      frequency_offset_hz: 500000000.0
+  cdc:
+    type: cd_compensation
+  fo:
+    type: fo_compensation
+  mf:
+    type: matched_filter
+    params:
+      decimate: false
+  agc:
+    type: agc
+    params:
+      remove_dc: false
+  eq:
+    type: adaptive_mimo_equalizer
+    params:
+      n_train: 1024
+  cpr:
+    type: phase_recovery
+    params:
+      ref_start: 1100
+  mux:
+    type: stream_mux
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+    params:
+      skip_bits: 9000
+  evm:
+    type: evm_meter
+    params:
+      skip_symbols: 2400
 edges:
-  - dmx.out -> eq.ref
-  - dmx.out -> cpr.ref
-  - src.out -> ber.tx
-  - map.out -> evm.ref
-  - mux.out -> evm.in
+- src.out -> map.in
+- map.out -> dmx.in
+- dmx.out -> tx.in
+- tx.out -> mod.in
+- mod.out -> link.in
+- link.out -> rx.in
+- rx.out -> cdc.in
+- cdc.out -> fo.in
+- fo.out -> mf.in
+- mf.out -> agc.in
+- agc.out -> eq.in
+- eq.out -> cpr.in
+- cpr.out -> mux.in
+- mux.out -> demap.in
+- demap.out -> ber.rx
+- dmx.out -> eq.ref
+- dmx.out -> cpr.ref
+- src.out -> ber.tx
+- map.out -> evm.ref
+- mux.out -> evm.in
 probes:
-  - {key: mf.out, view: constellation}
-  - {key: eq.out, view: constellation}
-  - {key: cpr.out, view: constellation}
+- key: mf.out
+  view: constellation
+- key: eq.out
+  view: constellation
+- key: cpr.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 372.0
+  - 40.0
+  dmx:
+  - 644.0
+  - 74.0
+  tx:
+  - 912.0
+  - 74.0
+  mod:
+  - 1183.0
+  - 111.0
+  link:
+  - 1448.0
+  - 121.0
+  rx:
+  - 1753.0
+  - 119.0
+  cdc:
+  - 2008.0
+  - 74.0
+  fo:
+  - 2008.0
+  - 347.0
+  mf:
+  - 1740.0
+  - 347.0
+  agc:
+  - 1496.0
+  - 384.0
+  eq:
+  - 1180.0
+  - 368.0
+  cpr:
+  - 912.0
+  - 368.0
+  mux:
+  - 644.0
+  - 347.0
+  demap:
+  - 364.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+  evm:
+  - 352.0
+  - 536.0
+port_layout:
+  fo:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  mf:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  eq:
+    in:in:
+    - right
+    - 0.25
+    in:ref:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  cpr:
+    in:in:
+    - right
+    - 0.25
+    in:ref:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  mux:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75
+  evm:
+    in:ref:
+    - right
+    - 0.25
+    in:in:
+    - right
+    - 0.75

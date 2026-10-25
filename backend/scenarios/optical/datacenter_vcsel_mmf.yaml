@@ -1,32 +1,148 @@
 name: 25G VCSEL multimode data-center link
 category: Optical
-description: One lane of a 100GBASE-SR4-like link inside a data center. A 25.78 GBd NRZ
-  850 nm VCSEL (rate equations with spatial hole burning and self-heating, 7 mA bias,
-  +-3 mA swing) drives OM4 multimode fiber into a PIN receiver with a 4th-order
-  Bessel-Thomson response at 0.75 times the symbol rate. Raise laser.ambient_c to 70 to see
-  the thermal leakage cut the power and the bandwidth. Sweep fib.length_m from 50 to 600 m
-  and compare fib.fiber_type OM3 / OM4 to see modal and chromatic dispersion close the eye;
-  set fib.model to mode_groups and fib.launch to gaussian for the restricted-launch view.
+description: One lane of a 100GBASE-SR4-like link inside a data center. A 25.78 GBd
+  NRZ 850 nm VCSEL (rate equations with spatial hole burning and self-heating, 7 mA
+  bias, +-3 mA swing) drives OM4 multimode fiber into a PIN receiver with a 4th-order
+  Bessel-Thomson response at 0.75 times the symbol rate. Raise laser.ambient_c to
+  70 to see the thermal leakage cut the power and the bandwidth. Sweep fib.length_m
+  from 50 to 600 m and compare fib.fiber_type OM3 / OM4 to see modal and chromatic
+  dispersion close the eye; set fib.model to mode_groups and fib.launch to gaussian
+  for the restricted-launch view.
 seed: 1
 batch_size: 16
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  map: {type: mapper, params: {scheme: pam, order: 2, symbol_rate: 25781250000.0}}
-  tx: {type: pulse_shaper, params: {shape: rect, sps: 4}}
-  laser: {type: vcsel, params: {bias_ma: 7.0, modulation_ma: 3.0, rin_db_hz: -140.0, spectral_width_nm: 0.4}}
-  cpl: {type: optical_attenuator, params: {loss_db: 6.0}}
-  fib: {type: multimode_fiber, params: {fiber_type: OM4, length_m: 100.0}}
-  opm: {type: optical_power_meter}
-  pd: {type: photodiode, params: {responsivity: 0.6, thermal_noise_pa_rthz: 20.0, bandwidth_ghz: 19.34}}
-  rx: {type: matched_filter, params: {shape: none}}
-  agc: {type: agc}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-chain: [src, map, tx, laser, cpl, fib, pd, rx, agc, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      scheme: pam
+      order: 2
+      symbol_rate: 25781250000.0
+  tx:
+    type: pulse_shaper
+    params:
+      shape: rect
+      sps: 4
+  laser:
+    type: vcsel
+  cpl:
+    type: optical_attenuator
+    params:
+      loss_db: 6.0
+  fib:
+    type: multimode_fiber
+  opm:
+    type: optical_power_meter
+  pd:
+    type: photodiode
+    params:
+      responsivity: 0.6
+      bandwidth_ghz: 19.34
+  rx:
+    type: matched_filter
+    params:
+      shape: none
+  agc:
+    type: agc
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
 edges:
-  - fib.out -> opm.in
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> tx.in
+- tx.out -> laser.in
+- laser.out -> cpl.in
+- cpl.out -> fib.in
+- fib.out -> pd.in
+- pd.out -> rx.in
+- rx.out -> agc.in
+- agc.out -> demap.in
+- demap.out -> ber.rx
+- fib.out -> opm.in
+- src.out -> ber.tx
 probes:
-  - {key: pd.out, view: eye}
-  - {key: laser.out, view: time}
-  - {key: agc.out, view: constellation}
+- key: pd.out
+  view: eye
+- key: laser.out
+  view: time
+- key: agc.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 264.0
+  map:
+  - 362.0
+  - 238.0
+  tx:
+  - 624.0
+  - 272.0
+  laser:
+  - 892.0
+  - 309.0
+  cpl:
+  - 1182.0
+  - 309.0
+  fib:
+  - 1417.0
+  - 311.0
+  opm:
+  - 1539.0
+  - 40.0
+  pd:
+  - 1412.0
+  - 582.0
+  rx:
+  - 1144.0
+  - 545.0
+  agc:
+  - 920.0
+  - 582.0
+  demap:
+  - 624.0
+  - 545.0
+  ber:
+  - 352.0
+  - 526.0
+port_layout:
+  pd:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  rx:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

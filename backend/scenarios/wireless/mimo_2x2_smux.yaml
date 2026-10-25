@@ -1,23 +1,109 @@
 name: 2x2 MIMO spatial multiplexing
 category: Wireless
-description: Two 16-QAM streams over a Rayleigh MIMO channel. Try the zf, mmse and ml detectors
-  and the antenna correlation.
+description: Two 16-QAM streams over a Rayleigh MIMO channel. Try the zf, mmse and
+  ml detectors and the antenna correlation.
 seed: 4
 batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-  dmx: {type: stream_demux, params: {n_streams: 2}}
-  ch: {type: mimo_channel, params: {n_rx: 2, variation: fast}}
-  awgn: {type: awgn, params: {snr_db: 16.0}}
-  det: {type: mimo_detector, params: {method: mmse}}
-  mux: {type: stream_mux}
-  demap: {type: demapper, params: {method: maxlog}}
-  ber: {type: ber_meter}
-chain: [src, map, dmx, ch, awgn, det, mux, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      order: 16
+  dmx:
+    type: stream_demux
+  ch:
+    type: mimo_channel
+    params:
+      variation: fast
+  awgn:
+    type: awgn
+    params:
+      snr_db: 16.0
+  det:
+    type: mimo_detector
+  mux:
+    type: stream_mux
+  demap:
+    type: demapper
+  ber:
+    type: ber_meter
 edges:
-  - ch.csi -> det.csi
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> dmx.in
+- dmx.out -> ch.in
+- ch.out -> awgn.in
+- awgn.out -> det.in
+- det.out -> mux.in
+- mux.out -> demap.in
+- demap.out -> ber.rx
+- ch.csi -> det.csi
+- src.out -> ber.tx
 probes:
-  - {key: awgn.out, view: constellation}
-  - {key: mux.out, view: constellation}
+- key: awgn.out
+  view: constellation
+- key: mux.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 362.0
+  - 40.0
+  dmx:
+  - 624.0
+  - 74.0
+  ch:
+  - 892.0
+  - 99.0
+  awgn:
+  - 1207.0
+  - 107.0
+  det:
+  - 1164.0
+  - 368.0
+  mux:
+  - 894.0
+  - 347.0
+  demap:
+  - 624.0
+  - 347.0
+  ber:
+  - 352.0
+  - 328.0
+port_layout:
+  det:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  mux:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

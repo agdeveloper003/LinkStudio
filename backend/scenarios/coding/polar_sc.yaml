@@ -1,19 +1,90 @@
 name: Polar code with SC decoding
 category: Coding
-description: Rate-1/2 polar code (N = 256) built with the Bhattacharyya construction and decoded by
-  successive cancellation. Sweep awgn.snr_db from 0 to 4 dB with the BPSK theory as reference.
+description: Rate-1/2 polar code (N = 256) built with the Bhattacharyya construction
+  and decoded by successive cancellation. Sweep awgn.snr_db from 0 to 4 dB with the
+  BPSK theory as reference.
 seed: 1
 batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 512}}
-  enc: {type: polar_encoder, params: {block_length: 256, k: 128, design_snr_db: 1.0}}
-  map: {type: mapper, params: {scheme: psk, order: 2}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 3.0}}
-  demap: {type: demapper, params: {method: exact}}
-  dec: {type: polar_decoder, params: {block_length: 256, k: 128, design_snr_db: 1.0}}
-  ber: {type: ber_meter}
-chain: [src, enc, map, awgn, demap, dec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 512
+  enc:
+    type: polar_encoder
+    params:
+      design_snr_db: 1.0
+  map:
+    type: mapper
+    params:
+      scheme: psk
+      order: 2
+  awgn:
+    type: awgn
+    params:
+      snr_db: 3.0
+  demap:
+    type: demapper
+    params:
+      method: exact
+  dec:
+    type: polar_decoder
+    params:
+      design_snr_db: 1.0
+  ber:
+    type: ber_meter
 edges:
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> map.in
+- map.out -> awgn.in
+- awgn.out -> demap.in
+- demap.out -> dec.in
+- dec.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: demap.out, view: histogram}
+- key: demap.out
+  view: histogram
+layout:
+  src:
+  - 40.0
+  - 66.0
+  enc:
+  - 354.0
+  - 74.0
+  map:
+  - 632.0
+  - 40.0
+  awgn:
+  - 935.0
+  - 107.0
+  demap:
+  - 892.0
+  - 347.0
+  dec:
+  - 624.0
+  - 347.0
+  ber:
+  - 352.0
+  - 328.0
+port_layout:
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

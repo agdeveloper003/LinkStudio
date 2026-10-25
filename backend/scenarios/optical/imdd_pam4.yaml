@@ -1,28 +1,138 @@
 name: 56 Gb/s PAM-4 with a directly modulated laser
 category: Optical
-description: 28 GBd PAM-4 from a directly modulated DFB laser (rate equations, 60 mA bias,
-  +-36 mA swing) over 10 km of O-band single-mode fiber into a PIN receiver. Near the zero-
-  dispersion wavelength the laser chirp is harmless; set mod.wavelength_nm to 1550 and
-  fib.dispersion_ps_nm_km to 17 to see chirp and chromatic dispersion close the eye.
+description: 28 GBd PAM-4 from a directly modulated DFB laser (rate equations, 60
+  mA bias, +-36 mA swing) over 10 km of O-band single-mode fiber into a PIN receiver.
+  Near the zero- dispersion wavelength the laser chirp is harmless; set mod.wavelength_nm
+  to 1550 and fib.dispersion_ps_nm_km to 17 to see chirp and chromatic dispersion
+  close the eye.
 seed: 1
 batch_size: 8
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  map: {type: mapper, params: {scheme: pam, order: 4, symbol_rate: 28000000000.0}}
-  tx: {type: pulse_shaper, params: {shape: rc, sps: 4, rolloff: 0.3}}
-  mod: {type: dml, params: {bias_ma: 60.0, modulation_ma: 36.0, wavelength_nm: 1310.0}}
-  fib: {type: fiber, params: {length_km: 10.0, attenuation_db_km: 0.35, dispersion_ps_nm_km: 0.5}}
-  opm: {type: optical_power_meter}
-  pd: {type: photodiode}
-  rx: {type: matched_filter, params: {shape: none}}
-  agc: {type: agc}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-chain: [src, map, tx, mod, fib, pd, rx, agc, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      scheme: pam
+      symbol_rate: 28000000000.0
+  tx:
+    type: pulse_shaper
+    params:
+      shape: rc
+      sps: 4
+      rolloff: 0.3
+  mod:
+    type: dml
+  fib:
+    type: fiber
+    params:
+      attenuation_db_km: 0.35
+      dispersion_ps_nm_km: 0.5
+      length_km: 10.0
+  opm:
+    type: optical_power_meter
+  pd:
+    type: photodiode
+  rx:
+    type: matched_filter
+    params:
+      shape: none
+  agc:
+    type: agc
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
 edges:
-  - fib.out -> opm.in
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> tx.in
+- tx.out -> mod.in
+- mod.out -> fib.in
+- fib.out -> pd.in
+- pd.out -> rx.in
+- rx.out -> agc.in
+- agc.out -> demap.in
+- demap.out -> ber.rx
+- fib.out -> opm.in
+- src.out -> ber.tx
 probes:
-  - {key: pd.out, view: eye}
-  - {key: mod.out, view: spectrum}
-  - {key: agc.out, view: constellation}
+- key: pd.out
+  view: eye
+- key: mod.out
+  view: spectrum
+- key: agc.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 264.0
+  map:
+  - 360.0
+  - 238.0
+  tx:
+  - 620.0
+  - 272.0
+  mod:
+  - 898.0
+  - 309.0
+  fib:
+  - 1161.0
+  - 311.0
+  opm:
+  - 1283.0
+  - 40.0
+  pd:
+  - 1156.0
+  - 582.0
+  rx:
+  - 888.0
+  - 545.0
+  agc:
+  - 656.0
+  - 582.0
+  demap:
+  - 352.0
+  - 545.0
+  ber:
+  - 60.0
+  - 526.0
+port_layout:
+  pd:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  rx:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

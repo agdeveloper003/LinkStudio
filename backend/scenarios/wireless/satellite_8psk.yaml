@@ -1,29 +1,154 @@
 name: Satellite link, 8-PSK with TWTA
 category: Wireless
-description: DVB-S2-like 8-PSK with RRC 0.35 through a traveling-wave tube amplifier (Saleh model)
-  driven near saturation. The AM/PM rotation is removed by the decision-directed PLL. Lower
-  pa.input_backoff_db to see the nonlinear distortion grow.
+description: DVB-S2-like 8-PSK with RRC 0.35 through a traveling-wave tube amplifier
+  (Saleh model) driven near saturation. The AM/PM rotation is removed by the decision-directed
+  PLL. Lower pa.input_backoff_db to see the nonlinear distortion grow.
 seed: 1
 batch_size: 16
 blocks:
-  src: {type: random_bits, params: {n_bits: 3000}}
-  map: {type: mapper, params: {scheme: psk, order: 8, symbol_rate: 30000000.0}}
-  tx: {type: pulse_shaper, params: {shape: rrc, sps: 4, rolloff: 0.35, span: 12}}
-  pa: {type: power_amplifier, params: {model: saleh, input_backoff_db: 6.0}}
-  pn: {type: phase_noise, params: {linewidth_hz: 200.0}}
-  awgn: {type: awgn, params: {mode: esn0, snr_db: 16.0}}
-  mf: {type: matched_filter}
-  agc: {type: agc, params: {remove_dc: false}}
-  cr: {type: carrier_recovery}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter}
-  evm: {type: evm_meter}
-chain: [src, map, tx, pa, pn, awgn, mf, agc, cr, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 3000
+  map:
+    type: mapper
+    params:
+      scheme: psk
+      order: 8
+      symbol_rate: 30000000.0
+  tx:
+    type: pulse_shaper
+    params:
+      sps: 4
+      span: 12
+      rolloff: 0.35
+  pa:
+    type: power_amplifier
+    params:
+      model: saleh
+  pn:
+    type: phase_noise
+    params:
+      linewidth_hz: 200.0
+  awgn:
+    type: awgn
+    params:
+      snr_db: 16.0
+      mode: esn0
+  mf:
+    type: matched_filter
+  agc:
+    type: agc
+    params:
+      remove_dc: false
+  cr:
+    type: carrier_recovery
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+  evm:
+    type: evm_meter
 edges:
-  - src.out -> ber.tx
-  - map.out -> evm.ref
-  - cr.out -> evm.in
+- src.out -> map.in
+- map.out -> tx.in
+- tx.out -> pa.in
+- pa.out -> pn.in
+- pn.out -> awgn.in
+- awgn.out -> mf.in
+- mf.out -> agc.in
+- agc.out -> cr.in
+- cr.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
+- map.out -> evm.ref
+- cr.out -> evm.in
 probes:
-  - {key: pa.out, view: spectrum}
-  - {key: agc.out, view: constellation}
-  - {key: cr.out, view: constellation}
+- key: pa.out
+  view: spectrum
+- key: agc.out
+  view: constellation
+- key: cr.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 362.0
+  - 40.0
+  tx:
+  - 636.0
+  - 74.0
+  pa:
+  - 953.0
+  - 115.0
+  pn:
+  - 1191.0
+  - 121.0
+  awgn:
+  - 1423.0
+  - 107.0
+  mf:
+  - 1380.0
+  - 347.0
+  agc:
+  - 1184.0
+  - 384.0
+  cr:
+  - 916.0
+  - 347.0
+  demap:
+  - 636.0
+  - 347.0
+  ber:
+  - 352.0
+  - 328.0
+  evm:
+  - 624.0
+  - 515.0
+port_layout:
+  mf:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  cr:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75
+  evm:
+    in:ref:
+    - right
+    - 0.25
+    in:in:
+    - right
+    - 0.75

@@ -1,26 +1,110 @@
 name: Free-space optical link budget
 category: Optical
-description: 1 Gb/s OOK at 1550 nm over 1 km of free space with every loss of ITU-R P.1814 -
-  haze attenuation from the visibility (Kim model), beam spreading for 2 mrad divergence onto
-  an 8 cm aperture, gamma-gamma scintillation from Cn^2 and pointing jitter. Lower
-  fso.visibility_km to 1 (light fog) or raise fso.cn2 to 1e-13 to see the link fail.
+description: 1 Gb/s OOK at 1550 nm over 1 km of free space with every loss of ITU-R
+  P.1814 - haze attenuation from the visibility (Kim model), beam spreading for 2
+  mrad divergence onto an 8 cm aperture, gamma-gamma scintillation from Cn^2 and pointing
+  jitter. Lower fso.visibility_km to 1 (light fog) or raise fso.cn2 to 1e-13 to see
+  the link fail.
 seed: 1
 batch_size: 64
 blocks:
-  src: {type: random_bits, params: {n_bits: 1000}}
-  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 1000000000.0}}
-  tx: {type: intensity_modulator, params: {power_dbm: 10.0, extinction_ratio_db: 15.0}}
-  fso: {type: fso_channel, params: {distance_m: 1000.0, visibility_km: 5.0, divergence_mrad: 2.0,
-    rx_aperture_m: 0.08, cn2: 1.0e-14, turbulence: gamma_gamma, pointing_jitter_m: 0.2}}
-  opm: {type: optical_power_meter}
-  pd: {type: photodiode, params: {thermal_noise_pa_rthz: 10.0}}
-  agc: {type: agc}
-  dec: {type: line_decoder}
-  ber: {type: ber_meter}
-chain: [src, lc, tx, fso, pd, agc, dec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 1000
+  lc:
+    type: line_encoder
+  tx:
+    type: intensity_modulator
+    params:
+      power_dbm: 10.0
+      extinction_ratio_db: 15.0
+  fso:
+    type: fso_channel
+    params:
+      visibility_km: 5.0
+      pointing_jitter_m: 0.2
+  opm:
+    type: optical_power_meter
+  pd:
+    type: photodiode
+    params:
+      thermal_noise_pa_rthz: 10.0
+  agc:
+    type: agc
+  dec:
+    type: line_decoder
+  ber:
+    type: ber_meter
 edges:
-  - fso.out -> opm.in
-  - src.out -> ber.tx
+- src.out -> lc.in
+- lc.out -> tx.in
+- tx.out -> fso.in
+- fso.out -> pd.in
+- pd.out -> agc.in
+- agc.out -> dec.in
+- dec.out -> ber.rx
+- fso.out -> opm.in
+- src.out -> ber.tx
 probes:
-  - {key: fso.csi, view: csi}
-  - {key: agc.out, view: constellation}
+- key: fso.csi
+  view: csi
+- key: agc.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 238.0
+  lc:
+  - 352.0
+  - 246.0
+  tx:
+  - 620.0
+  - 283.0
+  fso:
+  - 862.0
+  - 283.0
+  opm:
+  - 1024.0
+  - 40.0
+  pd:
+  - 877.0
+  - 530.0
+  agc:
+  - 643.0
+  - 530.0
+  dec:
+  - 352.0
+  - 493.0
+  ber:
+  - 60.0
+  - 474.0
+port_layout:
+  pd:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

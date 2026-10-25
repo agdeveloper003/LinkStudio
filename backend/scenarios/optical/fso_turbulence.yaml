@@ -1,21 +1,102 @@
 name: Free-space optical link with turbulence
 category: Optical
-description: 1 Gb/s OOK through atmospheric turbulence (gamma-gamma scintillation, constant over
-  a frame). Strong turbulence makes some frames fail (see ber.fer); compare the lognormal model.
+description: 1 Gb/s OOK through atmospheric turbulence (gamma-gamma scintillation,
+  constant over a frame). Strong turbulence makes some frames fail (see ber.fer);
+  compare the lognormal model.
 seed: 1
 batch_size: 64
 blocks:
-  src: {type: random_bits, params: {n_bits: 1000}}
-  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 1000000000.0}}
-  tx: {type: intensity_modulator, params: {power_dbm: -26.0, extinction_ratio_db: 15.0}}
-  fso: {type: fso_turbulence, params: {model: gamma_gamma, alpha: 4.0, beta: 1.5}}
-  pd: {type: photodiode, params: {thermal_noise_pa_rthz: 10.0}}
-  agc: {type: agc}
-  dec: {type: line_decoder}
-  ber: {type: ber_meter}
-chain: [src, lc, tx, fso, pd, agc, dec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 1000
+  lc:
+    type: line_encoder
+  tx:
+    type: intensity_modulator
+    params:
+      power_dbm: -26.0
+      extinction_ratio_db: 15.0
+  fso:
+    type: fso_turbulence
+    params:
+      model: gamma_gamma
+      beta: 1.5
+  pd:
+    type: photodiode
+    params:
+      thermal_noise_pa_rthz: 10.0
+  agc:
+    type: agc
+  dec:
+    type: line_decoder
+  ber:
+    type: ber_meter
 edges:
-  - src.out -> ber.tx
+- src.out -> lc.in
+- lc.out -> tx.in
+- tx.out -> fso.in
+- fso.out -> pd.in
+- pd.out -> agc.in
+- agc.out -> dec.in
+- dec.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: fso.csi, view: csi}
-  - {key: agc.out, view: constellation}
+- key: fso.csi
+  view: csi
+- key: agc.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 40.0
+  lc:
+  - 352.0
+  - 48.0
+  tx:
+  - 620.0
+  - 85.0
+  fso:
+  - 862.0
+  - 85.0
+  pd:
+  - 862.0
+  - 332.0
+  agc:
+  - 643.0
+  - 332.0
+  dec:
+  - 352.0
+  - 295.0
+  ber:
+  - 60.0
+  - 276.0
+port_layout:
+  pd:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

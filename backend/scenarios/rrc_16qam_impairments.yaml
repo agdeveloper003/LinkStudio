@@ -1,34 +1,103 @@
-# Single-carrier 16-QAM waveform through a realistic front-end:
-# RRC shaping -> PA (Rapp) -> IQ imbalance -> phase noise -> AWGN -> matched filter.
-#   python -m linkstudio run scenarios/rrc_16qam_impairments.yaml
-category: Examples (CLI)
 name: rrc-16qam-impairments
+category: Examples (CLI)
 seed: 2
 batch_size: 16
-
 blocks:
-  src:   {type: random_bits, params: {n_bits: 4000}}
-  map:   {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 1.0e6}}
-  tx:    {type: pulse_shaper, params: {shape: rrc, sps: 4, span: 10, rolloff: 0.25}}
-  pa:    {type: power_amplifier, params: {model: rapp, input_backoff_db: 8.0, smoothness: 3.0}}
-  iq:    {type: iq_imbalance, params: {amplitude_db: 0.3, phase_deg: 2.0}}
-  # No carrier tracking yet: the Wiener phase drifts freely over the 1 ms frame
-  # (std = sqrt(2*pi*linewidth*T)), so keep the linewidth small.
-  pn:    {type: phase_noise, params: {linewidth_hz: 2.0}}
-  awgn:  {type: awgn, params: {mode: esn0, snr_db: 22.0}}
-  mf:    {type: matched_filter}
-  demap: {type: demapper, params: {method: hard}}
-  ber:   {type: ber_meter}
-  evm:   {type: evm_meter}
-  pwr:   {type: power_meter}
-
-chain: [src, map, tx, pa, iq, pn, awgn, mf, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      order: 16
+  tx:
+    type: pulse_shaper
+    params:
+      sps: 4
+  pa:
+    type: power_amplifier
+    params:
+      input_backoff_db: 8.0
+      smoothness: 3.0
+  iq:
+    type: iq_imbalance
+    params:
+      amplitude_db: 0.3
+      phase_deg: 2.0
+  pn:
+    type: phase_noise
+    params:
+      linewidth_hz: 2.0
+  awgn:
+    type: awgn
+    params:
+      snr_db: 22.0
+      mode: esn0
+  mf:
+    type: matched_filter
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+  evm:
+    type: evm_meter
+  pwr:
+    type: power_meter
 edges:
-  - src.out -> ber.tx
-  - map.out -> evm.ref
-  - mf.out -> evm.in
-  - tx.out -> pwr.in
-
+- src.out -> map.in
+- map.out -> tx.in
+- tx.out -> pa.in
+- pa.out -> iq.in
+- iq.out -> pn.in
+- pn.out -> awgn.in
+- awgn.out -> mf.in
+- mf.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
+- map.out -> evm.ref
+- mf.out -> evm.in
+- tx.out -> pwr.in
 simulation:
   n_batches: 5
-capture: [mf.out]
+probes:
+- key: mf.out
+layout:
+  src:
+  - 40.0
+  - 242.0
+  map:
+  - 352.0
+  - 216.0
+  tx:
+  - 604.0
+  - 250.0
+  pa:
+  - 872.0
+  - 291.0
+  iq:
+  - 1066.0
+  - 250.0
+  pn:
+  - 1334.0
+  - 297.0
+  awgn:
+  - 1516.0
+  - 283.0
+  mf:
+  - 1698.0
+  - 250.0
+  demap:
+  - 1978.0
+  - 250.0
+  ber:
+  - 2258.0
+  - 231.0
+  evm:
+  - 1966.0
+  - 452.0
+  pwr:
+  - 776.0
+  - 40.0

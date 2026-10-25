@@ -1,21 +1,57 @@
 name: 2 - 16-QAM and soft demapping
 category: Tutorials
-description: Gray-labelled 16-QAM with log-likelihood ratios. Watch the LLR histogram separate
-  as the SNR grows, and change map.order to 4, 64 or 256.
+description: Gray-labelled 16-QAM with log-likelihood ratios. Watch the LLR histogram
+  separate as the SNR grows, and change map.order to 4, 64 or 256.
 seed: 1
 batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 10.0}}
-  demap: {type: demapper, params: {method: maxlog}}
-  ber: {type: ber_meter, params: {bits_per_symbol: 4}}
-  evm: {type: evm_meter}
-chain: [src, map, awgn, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  map:
+    type: mapper
+    params:
+      order: 16
+  awgn:
+    type: awgn
+  demap:
+    type: demapper
+  ber:
+    type: ber_meter
+    params:
+      bits_per_symbol: 4
+  evm:
+    type: evm_meter
 edges:
-  - src.out -> ber.tx
-  - map.out -> evm.ref
-  - awgn.out -> evm.in
+- src.out -> map.in
+- map.out -> awgn.in
+- awgn.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
+- map.out -> evm.ref
+- awgn.out -> evm.in
 probes:
-  - {key: awgn.out, view: constellation}
-  - {key: demap.out, view: histogram}
+- key: awgn.out
+  view: constellation
+- key: demap.out
+  view: histogram
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 352.0
+  - 40.0
+  awgn:
+  - 604.0
+  - 107.0
+  demap:
+  - 798.0
+  - 74.0
+  ber:
+  - 1078.0
+  - 55.0
+  evm:
+  - 786.0
+  - 276.0

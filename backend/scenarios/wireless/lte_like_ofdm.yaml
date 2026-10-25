@@ -1,34 +1,177 @@
 name: LTE-like OFDM, mobile channel
 category: Wireless
-description: 1.4 MHz LTE-like numerology (15 kHz subcarriers, 72 used tones) with a coded 16-QAM
-  stream, bit-interleaved across the band, over the 3GPP EVA channel with 70 Hz Doppler and LS channel estimation per OFDM symbol.
+description: 1.4 MHz LTE-like numerology (15 kHz subcarriers, 72 used tones) with
+  a coded 16-QAM stream, bit-interleaved across the band, over the 3GPP EVA channel
+  with 70 Hz Doppler and LS channel estimation per OFDM symbol.
 seed: 2
 batch_size: 8
 blocks:
-  src: {type: random_bits, params: {n_bits: 3994}}
-  enc: {type: conv_encoder}
-  il: {type: interleaver, params: {kind: random, seed: 5}}
-  map: {type: mapper, params: {scheme: qam, order: 16}}
-  ofdm: {type: ofdm_modulator, params: {n_fft: 128, cp_len: 10, n_active: 72, pilot_spacing: 6}}
-  ch: {type: multipath, params: {preset: EVA, variation: jakes, doppler_hz: 70.0}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 14.0}}
-  demod: {type: ofdm_demodulator}
-  est: {type: ofdm_channel_estimator, params: {method: ls}}
-  eq: {type: ofdm_equalizer}
-  demap: {type: demapper, params: {method: maxlog}}
-  dil: {type: interleaver, params: {kind: random, seed: 5, inverse: true}}
-  dec: {type: viterbi_decoder}
-  ber: {type: ber_meter}
-chain: [src, enc, il, map, ofdm, ch, awgn, demod, est]
+  src:
+    type: random_bits
+    params:
+      n_bits: 3994
+  enc:
+    type: conv_encoder
+  il:
+    type: interleaver
+    params:
+      seed: 5
+  map:
+    type: mapper
+    params:
+      order: 16
+  ofdm:
+    type: ofdm_modulator
+    params:
+      n_fft: 128
+      cp_len: 10
+      n_active: 72
+  ch:
+    type: multipath
+    params:
+      preset: EVA
+      variation: jakes
+      doppler_hz: 70.0
+  awgn:
+    type: awgn
+    params:
+      snr_db: 14.0
+  demod:
+    type: ofdm_demodulator
+  est:
+    type: ofdm_channel_estimator
+  eq:
+    type: ofdm_equalizer
+  demap:
+    type: demapper
+  dil:
+    type: interleaver
+    params:
+      seed: 5
+      inverse: true
+  dec:
+    type: viterbi_decoder
+  ber:
+    type: ber_meter
 edges:
-  - demod.out -> eq.in
-  - est.out -> eq.csi
-  - eq.out -> demap.in
-  - demap.out -> dil.in
-  - dil.out -> dec.in
-  - dec.out -> ber.rx
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> il.in
+- il.out -> map.in
+- map.out -> ofdm.in
+- ofdm.out -> ch.in
+- ch.out -> awgn.in
+- awgn.out -> demod.in
+- demod.out -> est.in
+- demod.out -> eq.in
+- est.out -> eq.csi
+- eq.out -> demap.in
+- demap.out -> dil.in
+- dil.out -> dec.in
+- dec.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: demod.out, view: grid}
-  - {key: est.out, view: csi}
-  - {key: eq.out, view: constellation}
+- key: demod.out
+  view: grid
+- key: est.out
+  view: csi
+- key: eq.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  enc:
+  - 352.0
+  - 74.0
+  il:
+  - 620.0
+  - 74.0
+  map:
+  - 896.0
+  - 40.0
+  ofdm:
+  - 1156.0
+  - 74.0
+  ch:
+  - 1432.0
+  - 111.0
+  awgn:
+  - 1735.0
+  - 107.0
+  demod:
+  - 1692.0
+  - 347.0
+  est:
+  - 1424.0
+  - 368.0
+  eq:
+  - 1156.0
+  - 368.0
+  demap:
+  - 888.0
+  - 347.0
+  dil:
+  - 620.0
+  - 347.0
+  dec:
+  - 352.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+port_layout:
+  demod:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  est:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  eq:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dil:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

@@ -74,6 +74,9 @@ export interface EditorGraph {
   probes: Probe[];
   simulation?: Record<string, unknown>;
   sweep?: Record<string, unknown> | null;
+  /** External ports of a subsystem file: port name -> "block.port". */
+  inputs?: Record<string, string>;
+  outputs?: Record<string, string>;
   validation?: Validation;
 }
 

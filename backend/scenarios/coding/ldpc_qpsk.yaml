@@ -1,20 +1,86 @@
 name: LDPC-coded QPSK
 category: Coding
-description: Rate-1/2 quasi-cyclic LDPC code (n = 768) with soft demapping and min-sum decoding.
-  Sweep awgn.snr_db from 0 to 3 dB to see the waterfall.
+description: Rate-1/2 quasi-cyclic LDPC code (n = 768) with soft demapping and min-sum
+  decoding. Sweep awgn.snr_db from 0 to 3 dB to see the waterfall.
 seed: 5
 batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 1536}}
-  enc: {type: ldpc_encoder}
-  map: {type: mapper, params: {scheme: psk, order: 4}}
-  awgn: {type: awgn, params: {snr_db: 2.0}}
-  demap: {type: demapper, params: {method: exact}}
-  dec: {type: ldpc_decoder}
-  ber: {type: ber_meter}
-chain: [src, enc, map, awgn, demap, dec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 1536
+  enc:
+    type: ldpc_encoder
+  map:
+    type: mapper
+    params:
+      scheme: psk
+  awgn:
+    type: awgn
+    params:
+      snr_db: 2.0
+  demap:
+    type: demapper
+    params:
+      method: exact
+  dec:
+    type: ldpc_decoder
+  ber:
+    type: ber_meter
 edges:
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> map.in
+- map.out -> awgn.in
+- awgn.out -> demap.in
+- demap.out -> dec.in
+- dec.out -> ber.rx
+- src.out -> ber.tx
 probes:
-  - {key: demap.out, view: histogram}
-  - {key: awgn.out, view: constellation}
+- key: demap.out
+  view: histogram
+- key: awgn.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  enc:
+  - 354.0
+  - 74.0
+  map:
+  - 632.0
+  - 40.0
+  awgn:
+  - 935.0
+  - 107.0
+  demap:
+  - 892.0
+  - 347.0
+  dec:
+  - 624.0
+  - 347.0
+  ber:
+  - 352.0
+  - 328.0
+port_layout:
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

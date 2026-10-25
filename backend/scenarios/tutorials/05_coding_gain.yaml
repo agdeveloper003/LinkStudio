@@ -1,27 +1,96 @@
 name: 5 - Coding gain (two branches)
 category: Tutorials
-description: The same bits go through an uncoded BPSK branch and a rate-1/2 convolutional branch
-  with soft Viterbi decoding, both at the same Eb/N0. Compare ber_uncoded and ber_coded.
+description: The same bits go through an uncoded BPSK branch and a rate-1/2 convolutional
+  branch with soft Viterbi decoding, both at the same Eb/N0. Compare ber_uncoded and
+  ber_coded.
 seed: 1
 batch_size: 32
 blocks:
-  src: {type: random_bits, params: {n_bits: 1000}}
-  map_u: {type: mapper, params: {scheme: psk, order: 2}}
-  awgn_u: {type: awgn, params: {mode: ebn0, snr_db: 4.0}}
-  demap_u: {type: demapper, params: {method: hard}}
-  ber_uncoded: {type: ber_meter}
-  enc: {type: conv_encoder}
-  map_c: {type: mapper, params: {scheme: psk, order: 2}}
-  awgn_c: {type: awgn, params: {mode: ebn0, snr_db: 4.0}}
-  demap_c: {type: demapper, params: {method: maxlog}}
-  dec: {type: viterbi_decoder}
-  ber_coded: {type: ber_meter}
-chain:
-  - [src, map_u, awgn_u, demap_u, ber_uncoded.rx]
-  - [src, enc, map_c, awgn_c, demap_c, dec, ber_coded.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 1000
+  map_u:
+    type: mapper
+    params:
+      scheme: psk
+      order: 2
+  awgn_u:
+    type: awgn
+    params:
+      snr_db: 4.0
+  demap_u:
+    type: demapper
+    params:
+      method: hard
+  ber_uncoded:
+    type: ber_meter
+  enc:
+    type: conv_encoder
+  map_c:
+    type: mapper
+    params:
+      scheme: psk
+      order: 2
+  awgn_c:
+    type: awgn
+    params:
+      snr_db: 4.0
+  demap_c:
+    type: demapper
+  dec:
+    type: viterbi_decoder
+  ber_coded:
+    type: ber_meter
 edges:
-  - src.out -> ber_uncoded.tx
-  - src.out -> ber_coded.tx
+- src.out -> map_u.in
+- map_u.out -> awgn_u.in
+- awgn_u.out -> demap_u.in
+- demap_u.out -> ber_uncoded.rx
+- src.out -> enc.in
+- enc.out -> map_c.in
+- map_c.out -> awgn_c.in
+- awgn_c.out -> demap_c.in
+- demap_c.out -> dec.in
+- dec.out -> ber_coded.rx
+- src.out -> ber_uncoded.tx
+- src.out -> ber_coded.tx
 probes:
-  - {key: awgn_u.out, view: constellation}
-  - {key: demap_c.out, view: histogram}
+- key: awgn_u.out
+  view: constellation
+- key: demap_c.out
+  view: histogram
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map_u:
+  - 360.0
+  - 276.0
+  awgn_u:
+  - 655.0
+  - 343.0
+  demap_u:
+  - 872.0
+  - 310.0
+  ber_uncoded:
+  - 1140.0
+  - 291.0
+  enc:
+  - 352.0
+  - 74.0
+  map_c:
+  - 620.0
+  - 40.0
+  awgn_c:
+  - 915.0
+  - 107.0
+  demap_c:
+  - 1142.0
+  - 74.0
+  dec:
+  - 1412.0
+  - 74.0
+  ber_coded:
+  - 1680.0
+  - 55.0

@@ -1,23 +1,113 @@
 name: O-band access link with APD
 category: Optical
-description: 10 Gb/s OOK at 1310 nm (near-zero dispersion) over 40 km of fiber into an avalanche
-  photodiode. Change pd.apd_gain to find the optimum between thermal and excess shot noise.
+description: 10 Gb/s OOK at 1310 nm (near-zero dispersion) over 40 km of fiber into
+  an avalanche photodiode. Change pd.apd_gain to find the optimum between thermal
+  and excess shot noise.
 seed: 1
 batch_size: 16
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 10000000000.0}}
-  tx: {type: intensity_modulator, params: {power_dbm: -2.0, extinction_ratio_db: 9.0, wavelength_nm: 1310.0}}
-  fib: {type: fiber, params: {length_km: 40.0, attenuation_db_km: 0.35, dispersion_ps_nm_km: 0.5}}
-  opm: {type: optical_power_meter}
-  pd: {type: photodiode, params: {apd_gain: 10.0, thermal_noise_pa_rthz: 25.0}}
-  agc: {type: agc}
-  dec: {type: line_decoder}
-  ber: {type: ber_meter}
-chain: [src, lc, tx, fib, pd, agc, dec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  lc:
+    type: line_encoder
+    params:
+      symbol_rate: 10000000000.0
+  tx:
+    type: intensity_modulator
+    params:
+      power_dbm: -2.0
+      extinction_ratio_db: 9.0
+      wavelength_nm: 1310.0
+  fib:
+    type: fiber
+    params:
+      attenuation_db_km: 0.35
+      dispersion_ps_nm_km: 0.5
+      length_km: 40.0
+  opm:
+    type: optical_power_meter
+  pd:
+    type: photodiode
+    params:
+      thermal_noise_pa_rthz: 25.0
+      apd_gain: 10.0
+  agc:
+    type: agc
+  dec:
+    type: line_decoder
+  ber:
+    type: ber_meter
 edges:
-  - fib.out -> opm.in
-  - src.out -> ber.tx
+- src.out -> lc.in
+- lc.out -> tx.in
+- tx.out -> fib.in
+- fib.out -> pd.in
+- pd.out -> agc.in
+- agc.out -> dec.in
+- dec.out -> ber.rx
+- fib.out -> opm.in
+- src.out -> ber.tx
 probes:
-  - {key: pd.out, view: time}
-  - {key: agc.out, view: constellation}
+- key: pd.out
+  view: time
+- key: agc.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 238.0
+  lc:
+  - 352.0
+  - 246.0
+  tx:
+  - 620.0
+  - 283.0
+  fib:
+  - 867.0
+  - 285.0
+  opm:
+  - 989.0
+  - 40.0
+  pd:
+  - 862.0
+  - 530.0
+  agc:
+  - 643.0
+  - 530.0
+  dec:
+  - 352.0
+  - 493.0
+  ber:
+  - 60.0
+  - 474.0
+port_layout:
+  pd:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

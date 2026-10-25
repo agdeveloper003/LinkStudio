@@ -134,6 +134,9 @@ def spec_to_editor(spec: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         "description": spec.get("description", ""),
         "category": spec.get("category", ""),
     }
+    for key in ("inputs", "outputs"):  # external ports of a subsystem file
+        if spec.get(key):
+            editor[key] = spec[key]
     editor["validation"] = validate_editor(editor, base_dir)
     return editor
 
@@ -213,6 +216,9 @@ def editor_to_yaml_dict(editor: dict[str, Any]) -> dict[str, Any]:
         out["sweep"] = editor["sweep"]
     if editor.get("probes"):
         out["probes"] = editor["probes"]
+    for key in ("inputs", "outputs"):
+        if editor.get(key):
+            out[key] = editor[key]
     out["layout"] = layout
     if port_layout:
         out["port_layout"] = port_layout

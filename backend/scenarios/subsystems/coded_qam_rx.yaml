@@ -1,12 +1,30 @@
-# Receiver: soft demapper -> de-interleaver -> soft Viterbi decoder.
 name: coded_qam_rx
+seed: 0
+batch_size: 32
 blocks:
-  demap: {type: demapper, params: {method: maxlog}}
-  dil:   {type: interleaver, params: {kind: random, seed: 7, inverse: true}}
-  dec:   {type: viterbi_decoder, params: {generators: [171, 133], constraint_length: 7}}
-chain: [demap, dil, dec]
-
+  demap:
+    type: demapper
+  dil:
+    type: interleaver
+    params:
+      seed: 7
+      inverse: true
+  dec:
+    type: viterbi_decoder
+edges:
+- demap.out -> dil.in
+- dil.out -> dec.in
 inputs:
   in: demap.in
 outputs:
   bits: dec.out
+layout:
+  demap:
+  - 40.0
+  - 40.0
+  dil:
+  - 308.0
+  - 40.0
+  dec:
+  - 576.0
+  - 40.0

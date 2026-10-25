@@ -1,22 +1,37 @@
-# Convolutionally coded, bit-interleaved 16-QAM. Transmitter and receiver are
-# reusable subsystems defined in their own files.
-#   python -m linkstudio run scenarios/coded_link_subsystems.yaml
-category: Examples (CLI)
 name: coded-16qam-subsystems
+category: Examples (CLI)
 seed: 3
 batch_size: 32
-
 blocks:
-  tx:   {type: subsystem, file: subsystems/coded_qam_tx.yaml}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 6.0}}
-  rx:   {type: subsystem, file: subsystems/coded_qam_rx.yaml}
-  ber:  {type: ber_meter}
-
+  tx:
+    type: subsystem
+    file: subsystems/coded_qam_tx.yaml
+  awgn:
+    type: awgn
+    params:
+      snr_db: 6.0
+  rx:
+    type: subsystem
+    file: subsystems/coded_qam_rx.yaml
+  ber:
+    type: ber_meter
 edges:
-  - tx.symbols -> awgn.in
-  - awgn.out -> rx.in
-  - rx.bits -> ber.rx
-  - tx.bits -> ber.tx
-
+- tx.symbols -> awgn.in
+- awgn.out -> rx.in
+- rx.bits -> ber.rx
+- tx.bits -> ber.tx
 simulation:
   n_batches: 10
+layout:
+  tx:
+  - 40.0
+  - 67.0
+  awgn:
+  - 296.0
+  - 92.0
+  rx:
+  - 478.0
+  - 89.0
+  ber:
+  - 734.0
+  - 40.0

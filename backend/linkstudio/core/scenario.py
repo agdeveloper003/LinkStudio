@@ -146,7 +146,8 @@ def scenario_from_dict(spec: Mapping[str, Any], base_dir: Path | None = None) ->
         batch_size=int(spec.get("batch_size", 32)),
         simulation=dict(spec.get("simulation") or {}),
         sweep=dict(spec["sweep"]) if spec.get("sweep") else None,
-        capture=list(spec.get("capture") or []),
+        # Files saved from the editor list the captured signals as probes.
+        capture=list(spec.get("capture") or [p["key"] for p in spec.get("probes") or [] if p.get("key")]),
     )
 
 

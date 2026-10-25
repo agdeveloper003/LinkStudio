@@ -55,7 +55,11 @@ export function edgeId(source: string, sourceHandle: string, target: string, tar
 export function toEditorGraph(
   nodes: BlockNodeType[],
   edges: Edge[],
-  meta: { name: string; description?: string; category?: string; seed: number; batch_size: number; probes: Probe[] },
+  meta: {
+    name: string; description?: string; category?: string; seed: number; batch_size: number; probes: Probe[];
+    simulation?: EditorGraph["simulation"]; sweep?: EditorGraph["sweep"];
+    inputs?: EditorGraph["inputs"]; outputs?: EditorGraph["outputs"];
+  },
 ): EditorGraph {
   const blocks: EditorGraph["blocks"] = {};
   for (const n of nodes) {
@@ -74,6 +78,11 @@ export function toEditorGraph(
     category: meta.category,
     seed: meta.seed,
     batch_size: meta.batch_size,
+    // Saved run settings of the scenario (stop rule, sweep ranges): kept as loaded.
+    ...(meta.simulation && Object.keys(meta.simulation).length ? { simulation: meta.simulation } : {}),
+    ...(meta.sweep ? { sweep: meta.sweep } : {}),
+    ...(meta.inputs ? { inputs: meta.inputs } : {}),
+    ...(meta.outputs ? { outputs: meta.outputs } : {}),
     blocks,
     edges: edges.map((e) => ({ source: `${e.source}.${e.sourceHandle}`, target: `${e.target}.${e.targetHandle}` })),
     probes: meta.probes.filter((p) => blocks[splitRef(p.key)[0]]),

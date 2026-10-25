@@ -1,31 +1,165 @@
 name: Raman-assisted long-haul link
 category: Optical
-description: 10 spans of 100 km with a 600 mW counter-propagating Raman pump in every span ahead
-  of the EDFA. The distributed gain keeps the signal away from the ASE floor - link metrics show
-  the on/off Raman gain and an equivalent span noise figure below the 3 dB limit of a lumped
-  amplifier. Set link.raman_pump_mw to 0 to compare with EDFA-only amplification.
+description: 10 spans of 100 km with a 600 mW counter-propagating Raman pump in every
+  span ahead of the EDFA. The distributed gain keeps the signal away from the ASE
+  floor - link metrics show the on/off Raman gain and an equivalent span noise figure
+  below the 3 dB limit of a lumped amplifier. Set link.raman_pump_mw to 0 to compare
+  with EDFA-only amplification.
 seed: 2
 batch_size: 4
 blocks:
-  src: {type: random_bits, params: {n_bits: 8000}}
-  map: {type: mapper, params: {scheme: psk, order: 4, symbol_rate: 32000000000.0}}
-  dmx: {type: stream_demux, params: {n_streams: 2}}
-  tx: {type: pulse_shaper, params: {sps: 2, rolloff: 0.1, span: 32}}
-  mod: {type: iq_modulator, params: {power_dbm: -9.0, linewidth_hz: 100000.0}}
-  link: {type: optical_link, params: {n_spans: 10, span_km: 100.0, raman_pump_mw: 600.0}}
-  rx: {type: coherent_receiver, params: {lo_linewidth_hz: 100000.0}}
-  cdc: {type: cd_compensation}
-  mf: {type: matched_filter, params: {decimate: false}}
-  agc: {type: agc, params: {remove_dc: false}}
-  eq: {type: adaptive_mimo_equalizer}
-  cpr: {type: phase_recovery}
-  mux: {type: stream_mux}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter, params: {skip_bits: 2400}}
-chain: [src, map, dmx, tx, mod, link, rx, cdc, mf, agc, eq, cpr, mux, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 8000
+  map:
+    type: mapper
+    params:
+      scheme: psk
+      symbol_rate: 32000000000.0
+  dmx:
+    type: stream_demux
+  tx:
+    type: pulse_shaper
+    params:
+      sps: 2
+      span: 32
+      rolloff: 0.1
+  mod:
+    type: iq_modulator
+    params:
+      power_dbm: -9.0
+  link:
+    type: optical_link
+    params:
+      span_km: 100.0
+      raman_pump_mw: 600.0
+  rx:
+    type: coherent_receiver
+  cdc:
+    type: cd_compensation
+  mf:
+    type: matched_filter
+    params:
+      decimate: false
+  agc:
+    type: agc
+    params:
+      remove_dc: false
+  eq:
+    type: adaptive_mimo_equalizer
+  cpr:
+    type: phase_recovery
+  mux:
+    type: stream_mux
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+    params:
+      skip_bits: 2400
 edges:
-  - dmx.out -> eq.ref
-  - dmx.out -> cpr.ref
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> dmx.in
+- dmx.out -> tx.in
+- tx.out -> mod.in
+- mod.out -> link.in
+- link.out -> rx.in
+- rx.out -> cdc.in
+- cdc.out -> mf.in
+- mf.out -> agc.in
+- agc.out -> eq.in
+- eq.out -> cpr.in
+- cpr.out -> mux.in
+- mux.out -> demap.in
+- demap.out -> ber.rx
+- dmx.out -> eq.ref
+- dmx.out -> cpr.ref
+- src.out -> ber.tx
 probes:
-  - {key: cpr.out, view: constellation}
+- key: cpr.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 360.0
+  - 40.0
+  dmx:
+  - 620.0
+  - 74.0
+  tx:
+  - 888.0
+  - 74.0
+  mod:
+  - 1171.0
+  - 111.0
+  link:
+  - 1156.0
+  - 375.0
+  rx:
+  - 901.0
+  - 373.0
+  cdc:
+  - 620.0
+  - 328.0
+  mf:
+  - 352.0
+  - 328.0
+  agc:
+  - 98.0
+  - 365.0
+  eq:
+  - 62.0
+  - 595.0
+  cpr:
+  - 352.0
+  - 595.0
+  mux:
+  - 620.0
+  - 574.0
+  demap:
+  - 888.0
+  - 574.0
+  ber:
+  - 1166.0
+  - 555.0
+port_layout:
+  link:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  rx:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  cdc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  mf:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5

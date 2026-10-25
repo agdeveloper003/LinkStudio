@@ -1,33 +1,174 @@
 name: Fast Ethernet 100BASE-TX
 category: Wireline
-description: 4B/5B block coding and MLT-3 at 125 MBd over 100 m of Cat 5e, with the local
-  transmitter leaking through the hybrid (full duplex). An NLMS echo canceller and an MMSE
-  equalizer recover the far-end signal.
+description: 4B/5B block coding and MLT-3 at 125 MBd over 100 m of Cat 5e, with the
+  local transmitter leaking through the hybrid (full duplex). An NLMS echo canceller
+  and an MMSE equalizer recover the far-end signal.
 seed: 1
 batch_size: 4
 blocks:
-  src: {type: random_bits, params: {n_bits: 4000}}
-  enc: {type: line_block_encoder, params: {code: 4b5b}}
-  lc: {type: line_encoder, params: {code: mlt3, symbol_rate: 125000000.0}}
-  ch: {type: copper_line, params: {preset: cat5e, length_m: 100.0}}
-  awgn: {type: awgn, params: {mode: snr, snr_db: 30.0}}
-  local_src: {type: random_bits, params: {n_bits: 4000}}
-  local_enc: {type: line_block_encoder, params: {code: 4b5b}}
-  local_lc: {type: line_encoder, params: {code: mlt3, symbol_rate: 125000000.0}}
-  echo: {type: hybrid_echo, params: {echo_db: -6.0}}
-  ec: {type: echo_canceller, params: {n_taps: 8}}
-  eq: {type: linear_equalizer, params: {n_taps: 21}}
-  dec: {type: line_decoder, params: {code: mlt3}}
-  bdec: {type: line_block_decoder, params: {code: 4b5b}}
-  ber: {type: ber_meter, params: {skip_bits: 1000}}
-chain:
-  - [src, enc, lc, ch, awgn, echo, ec, eq, dec, bdec, ber.rx]
-  - [local_src, local_enc, local_lc, echo.tx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  enc:
+    type: line_block_encoder
+    params:
+      code: 4b5b
+  lc:
+    type: line_encoder
+    params:
+      code: mlt3
+      symbol_rate: 125000000.0
+  ch:
+    type: copper_line
+  awgn:
+    type: awgn
+    params:
+      snr_db: 30.0
+      mode: snr
+  local_src:
+    type: random_bits
+    params:
+      n_bits: 4000
+  local_enc:
+    type: line_block_encoder
+    params:
+      code: 4b5b
+  local_lc:
+    type: line_encoder
+    params:
+      code: mlt3
+      symbol_rate: 125000000.0
+  echo:
+    type: hybrid_echo
+    params:
+      echo_db: -6.0
+  ec:
+    type: echo_canceller
+    params:
+      n_taps: 8
+  eq:
+    type: linear_equalizer
+    params:
+      n_taps: 21
+  dec:
+    type: line_decoder
+    params:
+      code: mlt3
+  bdec:
+    type: line_block_decoder
+    params:
+      code: 4b5b
+  ber:
+    type: ber_meter
+    params:
+      skip_bits: 1000
 edges:
-  - local_lc.out -> ec.tx
-  - ch.csi -> eq.csi
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> lc.in
+- lc.out -> ch.in
+- ch.out -> awgn.in
+- awgn.out -> echo.in
+- echo.out -> ec.in
+- ec.out -> eq.in
+- eq.out -> dec.in
+- dec.out -> bdec.in
+- bdec.out -> ber.rx
+- local_src.out -> local_enc.in
+- local_enc.out -> local_lc.in
+- local_lc.out -> echo.tx
+- local_lc.out -> ec.tx
+- ch.csi -> eq.csi
+- src.out -> ber.tx
 probes:
-  - {key: lc.out, view: time}
-  - {key: echo.out, view: time}
-  - {key: eq.out, view: time}
+- key: lc.out
+  view: time
+- key: echo.out
+  view: time
+- key: eq.out
+  view: time
+layout:
+  src:
+  - 40.0
+  - 40.0
+  enc:
+  - 354.0
+  - 48.0
+  lc:
+  - 624.0
+  - 48.0
+  ch:
+  - 905.0
+  - 85.0
+  awgn:
+  - 1203.0
+  - 81.0
+  local_src:
+  - 40.0
+  - 224.0
+  local_enc:
+  - 354.0
+  - 232.0
+  local_lc:
+  - 624.0
+  - 232.0
+  echo:
+  - 1461.0
+  - 85.0
+  ec:
+  - 1428.0
+  - 500.0
+  eq:
+  - 1160.0
+  - 500.0
+  dec:
+  - 892.0
+  - 479.0
+  bdec:
+  - 624.0
+  - 479.0
+  ber:
+  - 352.0
+  - 460.0
+port_layout:
+  ec:
+    in:in:
+    - right
+    - 0.25
+    in:tx:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  eq:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  dec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  bdec:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

@@ -6,18 +6,99 @@ description: Space-time block coding with two transmit antennas and one receiver
 seed: 3
 batch_size: 128
 blocks:
-  src: {type: random_bits, params: {n_bits: 400}}
-  map: {type: mapper, params: {scheme: psk, order: 4}}
-  stbc: {type: alamouti_encoder}
-  ch: {type: mimo_channel, params: {n_rx: 1, variation: block}}
-  awgn: {type: awgn, params: {mode: ebn0, snr_db: 12.0}}
-  dec: {type: alamouti_decoder}
-  demap: {type: demapper, params: {method: maxlog}}
-  ber: {type: ber_meter}
-chain: [src, map, stbc, ch, awgn, dec, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 400
+  map:
+    type: mapper
+    params:
+      scheme: psk
+  stbc:
+    type: alamouti_encoder
+  ch:
+    type: mimo_channel
+    params:
+      n_rx: 1
+  awgn:
+    type: awgn
+    params:
+      snr_db: 12.0
+  dec:
+    type: alamouti_decoder
+  demap:
+    type: demapper
+  ber:
+    type: ber_meter
 edges:
-  - ch.csi -> dec.csi
-  - src.out -> ber.tx
+- src.out -> map.in
+- map.out -> stbc.in
+- stbc.out -> ch.in
+- ch.out -> awgn.in
+- awgn.out -> dec.in
+- dec.out -> demap.in
+- demap.out -> ber.rx
+- ch.csi -> dec.csi
+- src.out -> ber.tx
 probes:
-  - {key: awgn.out, view: constellation}
-  - {key: dec.out, view: constellation}
+- key: awgn.out
+  view: constellation
+- key: dec.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 360.0
+  - 40.0
+  stbc:
+  - 620.0
+  - 74.0
+  ch:
+  - 888.0
+  - 99.0
+  awgn:
+  - 933.0
+  - 380.0
+  dec:
+  - 620.0
+  - 368.0
+  demap:
+  - 352.0
+  - 347.0
+  ber:
+  - 60.0
+  - 328.0
+port_layout:
+  awgn:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dec:
+    in:in:
+    - right
+    - 0.25
+    in:csi:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75

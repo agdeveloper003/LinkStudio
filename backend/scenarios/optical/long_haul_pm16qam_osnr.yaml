@@ -1,35 +1,204 @@
 name: 3000 km PM-16QAM OSNR budget
 category: Optical
-description: The OSNR exercise of the course - 40 transparent spans of 75 km (0.2 dB/km), EDFAs
-  with a 5 dB noise figure, 0 dBm launch power and 64 GBd PM-16QAM. The link metric
-  link.osnr_rs_db (noise in B = R_s) is about 15 dB, above the 14 dB a 64 GBd PM-16QAM
-  transceiver needs with soft-decision FEC. Sweep link.n_spans to find the reach.
+description: The OSNR exercise of the course - 40 transparent spans of 75 km (0.2
+  dB/km), EDFAs with a 5 dB noise figure, 0 dBm launch power and 64 GBd PM-16QAM.
+  The link metric link.osnr_rs_db (noise in B = R_s) is about 15 dB, above the 14
+  dB a 64 GBd PM-16QAM transceiver needs with soft-decision FEC. Sweep link.n_spans
+  to find the reach.
 seed: 5
 batch_size: 2
 blocks:
-  src: {type: random_bits, params: {n_bits: 32000}}
-  map: {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 64000000000.0}}
-  dmx: {type: stream_demux, params: {n_streams: 2}}
-  tx: {type: pulse_shaper, params: {sps: 2, rolloff: 0.1, span: 32}}
-  mod: {type: iq_modulator, params: {power_dbm: 0.0, linewidth_hz: 100000.0}}
-  link: {type: optical_link, params: {n_spans: 40, span_km: 75.0, attenuation_db_km: 0.2, noise_figure_db: 5.0,
-    polarization_rotation: true}}
-  rx: {type: coherent_receiver, params: {lo_linewidth_hz: 100000.0}}
-  cdc: {type: cd_compensation}
-  mf: {type: matched_filter, params: {decimate: false}}
-  agc: {type: agc, params: {remove_dc: false}}
-  eq: {type: adaptive_mimo_equalizer, params: {n_train: 2048}}
-  cpr: {type: phase_recovery, params: {ref_start: 2200}}
-  mux: {type: stream_mux}
-  demap: {type: demapper, params: {method: hard}}
-  ber: {type: ber_meter, params: {skip_bits: 20000}}
-  evm: {type: evm_meter, params: {skip_symbols: 5000}}
-chain: [src, map, dmx, tx, mod, link, rx, cdc, mf, agc, eq, cpr, mux, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 32000
+  map:
+    type: mapper
+    params:
+      order: 16
+      symbol_rate: 64000000000.0
+  dmx:
+    type: stream_demux
+  tx:
+    type: pulse_shaper
+    params:
+      sps: 2
+      span: 32
+      rolloff: 0.1
+  mod:
+    type: iq_modulator
+  link:
+    type: optical_link
+    params:
+      polarization_rotation: true
+      n_spans: 40
+      span_km: 75.0
+  rx:
+    type: coherent_receiver
+  cdc:
+    type: cd_compensation
+  mf:
+    type: matched_filter
+    params:
+      decimate: false
+  agc:
+    type: agc
+    params:
+      remove_dc: false
+  eq:
+    type: adaptive_mimo_equalizer
+    params:
+      n_train: 2048
+  cpr:
+    type: phase_recovery
+    params:
+      ref_start: 2200
+  mux:
+    type: stream_mux
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+    params:
+      skip_bits: 20000
+  evm:
+    type: evm_meter
+    params:
+      skip_symbols: 5000
 edges:
-  - dmx.out -> eq.ref
-  - dmx.out -> cpr.ref
-  - src.out -> ber.tx
-  - map.out -> evm.ref
-  - mux.out -> evm.in
+- src.out -> map.in
+- map.out -> dmx.in
+- dmx.out -> tx.in
+- tx.out -> mod.in
+- mod.out -> link.in
+- link.out -> rx.in
+- rx.out -> cdc.in
+- cdc.out -> mf.in
+- mf.out -> agc.in
+- agc.out -> eq.in
+- eq.out -> cpr.in
+- cpr.out -> mux.in
+- mux.out -> demap.in
+- demap.out -> ber.rx
+- dmx.out -> eq.ref
+- dmx.out -> cpr.ref
+- src.out -> ber.tx
+- map.out -> evm.ref
+- mux.out -> evm.in
 probes:
-  - {key: cpr.out, view: constellation}
+- key: cpr.out
+  view: constellation
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 362.0
+  - 40.0
+  dmx:
+  - 636.0
+  - 74.0
+  tx:
+  - 916.0
+  - 74.0
+  mod:
+  - 1187.0
+  - 111.0
+  link:
+  - 1452.0
+  - 121.0
+  rx:
+  - 1744.0
+  - 119.0
+  cdc:
+  - 1986.0
+  - 74.0
+  mf:
+  - 1986.0
+  - 347.0
+  agc:
+  - 1767.0
+  - 384.0
+  eq:
+  - 1464.0
+  - 368.0
+  cpr:
+  - 1184.0
+  - 368.0
+  mux:
+  - 916.0
+  - 347.0
+  demap:
+  - 636.0
+  - 347.0
+  ber:
+  - 352.0
+  - 328.0
+  evm:
+  - 624.0
+  - 536.0
+port_layout:
+  mf:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  eq:
+    in:in:
+    - right
+    - 0.25
+    in:ref:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  cpr:
+    in:in:
+    - right
+    - 0.25
+    in:ref:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25
+  mux:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  demap:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ber:
+    in:tx:
+    - right
+    - 0.25
+    in:rx:
+    - right
+    - 0.75
+  evm:
+    in:ref:
+    - right
+    - 0.25
+    in:in:
+    - right
+    - 0.75

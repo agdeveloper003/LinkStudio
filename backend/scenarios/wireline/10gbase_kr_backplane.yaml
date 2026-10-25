@@ -1,28 +1,157 @@
 name: 10GBASE-KR backplane
 category: Wireline
-description: 64B/66B-coded NRZ at 10.3125 GBd over 1 m of PCB backplane. CTLE plus an adaptive
-  FFE/DFE open the eye. Watch the sync-header errors (bdec.invalid_words).
+description: 64B/66B-coded NRZ at 10.3125 GBd over 1 m of PCB backplane. CTLE plus
+  an adaptive FFE/DFE open the eye. Watch the sync-header errors (bdec.invalid_words).
 seed: 1
 batch_size: 4
 blocks:
-  src: {type: random_bits, params: {n_bits: 6400}}
-  enc: {type: line_block_encoder, params: {code: 64b66b}}
-  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 10312500000.0}}
-  tx: {type: pulse_shaper, params: {shape: rc, sps: 8, rolloff: 0.5, span: 8}}
-  ch: {type: copper_line, params: {preset: backplane, length_m: 1.0}}
-  awgn: {type: awgn, params: {mode: snr, snr_db: 26.0}}
-  ctle: {type: ctle, params: {zero_hz: 1000000000.0, pole1_hz: 5000000000.0, pole2_hz: 20000000000.0}}
-  rx: {type: matched_filter, params: {shape: none}}
-  agc: {type: agc, params: {remove_dc: false}}
-  dfe: {type: dfe_equalizer}
-  dec: {type: line_decoder, params: {code: nrz}}
-  bdec: {type: line_block_decoder, params: {code: 64b66b}}
-  ber: {type: ber_meter, params: {skip_bits: 400}}
-chain: [src, enc, lc, tx, ch, awgn, ctle, rx, agc, dfe, dec, bdec, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 6400
+  enc:
+    type: line_block_encoder
+  lc:
+    type: line_encoder
+    params:
+      symbol_rate: 10312500000.0
+  tx:
+    type: pulse_shaper
+    params:
+      shape: rc
+      span: 8
+      rolloff: 0.5
+  ch:
+    type: copper_line
+    params:
+      preset: backplane
+      length_m: 1.0
+  awgn:
+    type: awgn
+    params:
+      snr_db: 26.0
+      mode: snr
+  ctle:
+    type: ctle
+    params:
+      pole1_hz: 5000000000.0
+      pole2_hz: 20000000000.0
+  rx:
+    type: matched_filter
+    params:
+      shape: none
+  agc:
+    type: agc
+    params:
+      remove_dc: false
+  dfe:
+    type: dfe_equalizer
+  dec:
+    type: line_decoder
+  bdec:
+    type: line_block_decoder
+  ber:
+    type: ber_meter
+    params:
+      skip_bits: 400
 edges:
-  - lc.out -> dfe.ref
-  - src.out -> ber.tx
+- src.out -> enc.in
+- enc.out -> lc.in
+- lc.out -> tx.in
+- tx.out -> ch.in
+- ch.out -> awgn.in
+- awgn.out -> ctle.in
+- ctle.out -> rx.in
+- rx.out -> agc.in
+- agc.out -> dfe.in
+- dfe.out -> dec.in
+- dec.out -> bdec.in
+- bdec.out -> ber.rx
+- lc.out -> dfe.ref
+- src.out -> ber.tx
 probes:
-  - {key: awgn.out, view: eye}
-  - {key: ctle.out, view: eye}
-  - {key: dfe.out, view: time}
+- key: awgn.out
+  view: eye
+- key: ctle.out
+  view: eye
+- key: dfe.out
+  view: time
+layout:
+  src:
+  - 40.0
+  - 40.0
+  enc:
+  - 352.0
+  - 48.0
+  lc:
+  - 622.0
+  - 48.0
+  tx:
+  - 892.0
+  - 48.0
+  ch:
+  - 1160.0
+  - 85.0
+  awgn:
+  - 1190.0
+  - 309.0
+  ctle:
+  - 892.0
+  - 276.0
+  rx:
+  - 622.0
+  - 276.0
+  agc:
+  - 388.0
+  - 313.0
+  dfe:
+  - 62.0
+  - 297.0
+  dec:
+  - 62.0
+  - 536.0
+  bdec:
+  - 352.0
+  - 536.0
+  ber:
+  - 620.0
+  - 517.0
+port_layout:
+  awgn:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  ctle:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  rx:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  agc:
+    in:in:
+    - right
+    - 0.5
+    out:out:
+    - left
+    - 0.5
+  dfe:
+    in:in:
+    - right
+    - 0.25
+    in:ref:
+    - right
+    - 0.75
+    out:out:
+    - left
+    - 0.25

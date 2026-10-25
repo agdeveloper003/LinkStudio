@@ -1,23 +1,65 @@
-# Uncoded QPSK over AWGN: BER/SER versus Eb/N0.
-#   python -m linkstudio run scenarios/qpsk_awgn_sweep.yaml --csv output/qpsk.csv
-category: Examples (CLI)
 name: qpsk-awgn-sweep
+category: Examples (CLI)
 seed: 1
 batch_size: 64
-
 blocks:
-  src:   {type: random_bits, params: {n_bits: 2000}}
-  map:   {type: mapper, params: {scheme: psk, order: 4}}
-  awgn:  {type: awgn, params: {mode: ebn0, snr_db: 0.0, signal_power: 1.0}}
-  demap: {type: demapper, params: {method: hard}}
-  ber:   {type: ber_meter, params: {bits_per_symbol: 2}}
-
-chain: [src, map, awgn, demap, ber.rx]
+  src:
+    type: random_bits
+    params:
+      n_bits: 2000
+  map:
+    type: mapper
+    params:
+      scheme: psk
+  awgn:
+    type: awgn
+    params:
+      snr_db: 0.0
+      signal_power: 1.0
+  demap:
+    type: demapper
+    params:
+      method: hard
+  ber:
+    type: ber_meter
+    params:
+      bits_per_symbol: 2
 edges:
-  - src.out -> ber.tx
-
+- src.out -> map.in
+- map.out -> awgn.in
+- awgn.out -> demap.in
+- demap.out -> ber.rx
+- src.out -> ber.tx
 sweep:
   params:
-    awgn.snr_db: [0, 2, 4, 6, 8, 10]
-  stop: {metric: ber.bit_errors, threshold: 200, max_batches: 300}
-  metrics: [ber.ber, ber.ser, ber.bit_errors]
+    awgn.snr_db:
+    - 0
+    - 2
+    - 4
+    - 6
+    - 8
+    - 10
+  stop:
+    metric: ber.bit_errors
+    threshold: 200
+    max_batches: 300
+  metrics:
+  - ber.ber
+  - ber.ser
+  - ber.bit_errors
+layout:
+  src:
+  - 40.0
+  - 66.0
+  map:
+  - 352.0
+  - 40.0
+  awgn:
+  - 604.0
+  - 107.0
+  demap:
+  - 786.0
+  - 74.0
+  ber:
+  - 1054.0
+  - 55.0
