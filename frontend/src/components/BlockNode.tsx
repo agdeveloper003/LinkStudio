@@ -5,7 +5,7 @@ import { BlockActionsContext, PortMoveContext, useCatalogue } from "../context";
 import { blockSize, bodySpec, isScopeType, placeFromPoint, placePoint, portKey, portPlaces, type BlockSize } from "../geometry";
 import type { BlockData, BlockNodeType } from "../graph";
 import { CATEGORY_COLORS, kindColor } from "../theme";
-import { ScopeScreen, ScopeSelector, displayFor, useScopePorts } from "./BlockDisplays";
+import { ScopeScreen, ScopeSelector, ScopeViewSelector, displayFor, useScopePorts } from "./BlockDisplays";
 
 /** Set by the library: blocks are drawn as pictures, without React Flow handles. */
 export const PreviewContext = createContext(false);
@@ -139,9 +139,10 @@ export function BlockView({ id, name = id, data, selected }: { id: string; name?
     >
       <div className="block-node-header" style={{ borderTopColor: color }}>
         <span className="block-node-name">{name}</span>
-        <span className="block-node-type" style={{ color }} title={data.type}>{info?.label ?? data.type}</span>
-        {scope && <ScopeSelector id={id} data={data} />}
+        {!scope && <span className="block-node-type" style={{ color }} title={data.type}>{info?.label ?? data.type}</span>}
       </div>
+      {scope && <ScopeViewSelector id={id} data={data} />}
+      {scope && <ScopeSelector id={id} data={data} />}
       {scope && <ScopeScreen id={id} data={data} />}
       {Display && <div className="display-body">{Display({ id, data, size })}</div>}
       {inputs.map((p) => (

@@ -207,7 +207,7 @@ class OFDMDemodulator(Block):
         return {"out": Signal(grid, Kind.GRID, fs=x.fs, meta={**x.meta, "ofdm": lay})}
 
 
-@register_block("ofdm_channel_estimator", category="detector", subcategory="Channel Estimation", label="OFDM Channel Estimator")
+@register_block("ofdm_channel_estimator", category="detector", label="OFDM Channel Estimator")
 class OFDMChannelEstimator(Block):
     """Estimate the channel frequency response on every subcarrier.
 

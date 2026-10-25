@@ -7,7 +7,9 @@
 import { useStore } from "@xyflow/react";
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BlockActionsContext, RunDataContext } from "../context";
+import type { ProbeResult } from "../api";
 import type { BlockData } from "../graph";
+import { isScopeType } from "../geometry";
 import { kindColor } from "../theme";
 import { ART, wavelengthColor } from "./BlockArt";
 import { ScopePlot } from "./plots/ProbeView";
@@ -22,7 +24,7 @@ const num = (v: unknown, fallback: number) => (typeof v === "number" && Number.i
 
 /** Body of a display block, chosen by block type (undefined: generic block). */
 export function displayFor(type: string): ((p: DisplayProps) => ReactNode) | undefined {
-  if (type.startsWith("scope_")) return undefined; // scopes draw their own frame (ScopeScreen)
+  if (isScopeType(type)) return undefined; // scopes draw their own frame (ScopeScreen)
   return DISPLAYS[type];
 }
 
@@ -119,18 +121,88 @@ export function ScopeSelector({ id, data }: { id: string; data: BlockData }) {
   );
 }
 
-/** The screen of a scope: the selected input's plot, filling the whole glass. */
-export function ScopeScreen({ id, data }: { id: string; data: BlockData }) {
+const VIEW_LABELS: Record<string, string> = {
+  time: "Time",
+  spectrum: "Spectrum",
+  constellation: "Constellation",
+  eye: "Eye diagram",
+  histogram: "LLR histogram",
+  grid: "Resource grid",
+  csi: "Channel response",
+};
+const ALL_VIEWS = Object.keys(VIEW_LABELS);
+
+/**
+ * Plot of the shown input in the chosen view. Live frames carry the chosen view; a
+ * Simulate run carries every view of the signal (``alt``), so switching needs no new run.
+ */
+function useScopePlot(id: string, data: BlockData): { plot?: ProbeResult; connected: boolean } {
   const sources = useInputSources(id);
   const run = useContext(RunDataContext);
   const port = `in${num(data.params.channel, 1)}`;
-  const plot = sources[port] ? run.probes[`${id}.${port}`] : undefined;
+  const probe = sources[port] ? run.probes[`${id}.${port}`] : undefined;
+  const view = typeof data.params.view === "string" ? data.params.view : "auto";
+  const alt = probe?.alt?.[view];
+  return { plot: probe && alt ? { ...probe, ...alt, view } : probe, connected: !!sources[port] };
+}
+
+/**
+ * Plot selector of a scope (under its name): the views that suit the shown signal (the
+ * kind decides: constellation, spectrum, eye... for samples, histogram for LLRs, ...)
+ * and Auto, the natural one.
+ */
+export function ScopeViewSelector({ id, data }: { id: string; data: BlockData }) {
+  const { setParam } = useContext(BlockActionsContext);
+  const { plot } = useScopePlot(id, data);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const chosen = typeof data.params.view === "string" ? data.params.view : "auto";
+  const shown = plot?.view;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const options = ["auto", ...(plot?.views ?? ALL_VIEWS)];
+  const label = (v: string) => (v === "auto" ? `Auto${shown ? ` · ${VIEW_LABELS[shown] ?? shown}` : ""}` : VIEW_LABELS[v] ?? v);
+  return (
+    <div className="scope-view nodrag nopan" ref={ref}>
+      <button className="scope-view-button" onClick={() => setOpen(!open)} title="Plot of the shown signal">
+        {chosen === "auto" ? label("auto") : VIEW_LABELS[shown ?? chosen] ?? chosen}
+        <span className="scope-selector-chev">▾</span>
+      </button>
+      {open && (
+        <div className="scope-selector-menu">
+          {options.map((v) => (
+            <button
+              key={v}
+              className={v === chosen ? "active" : ""}
+              onClick={() => {
+                setParam(id, "view", v);
+                setOpen(false);
+              }}
+            >
+              {label(v)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The screen of a scope: the selected input's plot, filling the whole glass. */
+export function ScopeScreen({ id, data }: { id: string; data: BlockData }) {
+  const { plot, connected } = useScopePlot(id, data);
   return (
     <div className="scope-bezel">
       <div className="scope-glass nowheel">
         <ScopePlot
           data={plot}
-          empty={sources[port] ? "Run Live or Simulate to see the signal." : "Drag an input onto a link to tap it."}
+          empty={connected ? "Run Live or Simulate to see the signal." : "Drag an input onto a link to tap it."}
         />
       </div>
     </div>

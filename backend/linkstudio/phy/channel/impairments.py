@@ -20,7 +20,7 @@ def _require_fs(x: Signal, what: str) -> float:
     return x.fs
 
 
-@register_block("gain", category="amplifier", subcategory="Electrical", label="Gain")
+@register_block("gain", category="amplifier", label="Gain")
 class Gain(Block):
     """Scale the signal by ``gain_db`` (e.g. path loss). Noise metadata is scaled too."""
 

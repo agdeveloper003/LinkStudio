@@ -9,7 +9,7 @@ A block declares
 
 Minimal example::
 
-    @register_block("gain", category="amplifier", subcategory="Electrical", label="Gain")
+    @register_block("gain", category="amplifier", label="Gain")
     class Gain(Block):
         class Params(BlockParams):
             gain_db: float = 0.0

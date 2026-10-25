@@ -543,7 +543,7 @@ def saturated_gain(g0: float, p_in_w: float, p_sat_w: float) -> float:
     return float(brentq(lambda g: g - g0 * np.exp(-(g - 1) * p_in_w / p_sat_w), 1.0, g0))
 
 
-@register_block("optical_amplifier", category="amplifier", subcategory="Optical", label="Optical Amplifier (EDFA, SOA)")
+@register_block("optical_amplifier", category="amplifier", label="Optical Amplifier (EDFA, SOA)")
 class OpticalAmplifier(Block):
     """Optical amplifier (EDFA, SOA) with amplified spontaneous emission noise.
 
@@ -600,7 +600,7 @@ class OpticalAmplifier(Block):
         return out
 
 
-@register_block("optical_attenuator", category="amplifier", subcategory="Optical", label="Optical Attenuator")
+@register_block("optical_attenuator", category="amplifier", label="Optical Attenuator")
 class OpticalAttenuator(Block):
     """Passive loss: variable optical attenuator, 1xN power splitter, connectors.
 
@@ -720,7 +720,7 @@ class OpticalLink(Block):
         return dict(self._last) if hasattr(self, "_last") else {}
 
 
-@register_block("wdm_multiplexer", category="multiplexer", subcategory="Wavelength", label="WDM Multiplexer")
+@register_block("wdm_multiplexer", category="multiplexer", label="WDM Multiplexer")
 class WDMMultiplexer(Block):
     """Wavelength-division multiplexing: add neighbouring channels around the channel under test.
 
@@ -772,7 +772,7 @@ class WDMMultiplexer(Block):
         return {"out": x.evolve(out, wdm={"n_channels": p.n_channels, "spacing_hz": p.spacing_ghz * 1e9})}
 
 
-@register_block("wdm_demultiplexer", category="demultiplexer", subcategory="Wavelength", label="WDM Demultiplexer")
+@register_block("wdm_demultiplexer", category="demultiplexer", label="WDM Demultiplexer")
 class WDMDemultiplexer(Block):
     """Select one WDM channel with an optical band-pass filter (rectangular or 2nd-order super-Gaussian)."""
 
@@ -1075,7 +1075,7 @@ class CoherentReceiver(Block):
         return {"out": Signal(beat + noise, Kind.SAMPLES, fs=fs, meta=meta)}
 
 
-@register_block("agc", category="amplifier", subcategory="Gain Control", label="Automatic Gain Control")
+@register_block("agc", category="amplifier", label="Automatic Gain Control")
 class AGC(Block):
     """Automatic gain control: remove the mean (optional) and scale every frame and stream
     to the nominal symbol power (``power`` metadata of the upstream mapper / line code).
@@ -1329,7 +1329,7 @@ class PhaseRecovery(Block):
         return {"out": x.evolve(out)}
 
 
-@register_block("optical_power_meter", category="measurement", subcategory="Power", label="Optical Power Meter")
+@register_block("optical_power_meter", category="measurement", label="Optical Power Meter")
 class OpticalPowerMeter(Block):
     """Average optical power (dBm) and OSNR (0.1 nm) of an optical signal."""
 

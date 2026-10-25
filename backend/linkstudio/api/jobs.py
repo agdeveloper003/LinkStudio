@@ -133,7 +133,7 @@ class JobManager:
         res = sim.run(n_batches=n_batches, stop=stop, capture="*" if self._workers(cfg) == 1 else keys,
                       on_batch=on_batch, workers=self._workers(cfg))
         job.result = {"metrics": res.metrics, "n_batches": res.n_batches, "elapsed_s": res.elapsed_s,
-                      "stop_reason": res.stop_reason, "probes": compute_probes(res.captures, probes)}
+                      "stop_reason": res.stop_reason, "probes": compute_probes(res.captures, probes, all_views=True)}
 
     def _run_sweep(self, job: Job, graph, editor: dict[str, Any], cfg: dict[str, Any]) -> None:
         params = cfg.get("params") or {}

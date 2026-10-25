@@ -122,3 +122,15 @@ def test_probe_views_carry_si_units():
     assert max(max(t) for t in eye["traces"]) == pytest.approx(1e-3, rel=0.05)  # raw amplitude, not normalized
     opt = compute_view(Signal(np.ones((1, 64), complex) * 1e-2, Kind.SAMPLES, fs=fs, meta={"unit": "√W"}), "spectrum")
     assert opt["yunit"] == "dBm/Hz"
+
+
+def test_scope_view_follows_the_signal():
+    from linkstudio.api.probes import compute_probes
+
+    sig = Signal(np.ones((1, 64), complex), Kind.SAMPLES, fs=1e9, meta={"sps": 4})
+    values = {"tx.out": sig}
+    auto = compute_probes(values, [{"key": "tx.out", "view": "auto"}])["tx.out"]
+    assert auto["view"] == "spectrum" and "eye" in auto["views"] and "alt" not in auto
+    # A view that does not suit the signal (an LLR histogram of samples) falls back to the natural one.
+    assert compute_probes(values, [{"key": "tx.out", "view": "histogram"}])["tx.out"]["view"] == "spectrum"
+    assert compute_probes(values, [{"key": "tx.out", "view": "eye"}])["tx.out"]["type"] == "eye"

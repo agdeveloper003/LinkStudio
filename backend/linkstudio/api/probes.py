@@ -187,7 +187,7 @@ def _csi_view(sig: Signal) -> dict[str, Any]:
 def scope_probes(editor: dict[str, Any]) -> list[dict[str, str]]:
     """One probe per connected scope input of an editor graph: the output feeding it.
 
-    Returned as ``{"id": "scope.inN", "key": "block.port", "view": ...}``.
+    Returned as ``{"id": "scope.inN", "key": "block.port", "scope": name, "view": ...}``.
     """
     sources = {e["target"]: e["source"] for e in editor.get("edges") or []}
     probes = []
@@ -200,10 +200,11 @@ def scope_probes(editor: dict[str, Any]) -> list[dict[str, str]]:
             continue
         if not issubclass(cls, Scope):
             continue
+        view = (b.get("params") or {}).get("view", "auto")
         for port in cls.inputs:
             ref = f"{name}.{port}"
             if ref in sources:
-                probes.append({"id": ref, "key": sources[ref], "view": cls.view})
+                probes.append({"id": ref, "key": sources[ref], "scope": name, "view": view})
     return probes
 
 
@@ -226,9 +227,14 @@ def block_displays(graph: Graph, values: dict[str, Signal]) -> dict[str, Any]:
     return out
 
 
-def compute_probes(values: dict[str, Signal], probes: list[dict[str, str]]) -> dict[str, Any]:
+def compute_probes(values: dict[str, Signal], probes: list[dict[str, str]], all_views: bool = False) -> dict[str, Any]:
     """Plot data for every requested ``{"key": "block.port", "view": ...}`` probe, keyed by
-    the probe ``id`` (the scope name) when given, else by ``key``."""
+    the probe ``id`` (the scope input) when given, else by ``key``.
+
+    The view is used when it suits the signal, otherwise (and for ``auto``) the first of
+    :func:`available_views`. With ``all_views`` the other views are sent too, under
+    ``alt``, so the UI can switch plot after a run without simulating again.
+    """
     out: dict[str, Any] = {}
     for probe in probes:
         key = probe["key"]
@@ -238,11 +244,19 @@ def compute_probes(values: dict[str, Signal], probes: list[dict[str, str]]) -> d
             out[out_key] = {"type": "message", "text": f"No signal '{key}'."}
             continue
         views = available_views(sig)
-        view = probe.get("view") or (views[0] if views else "")
-        try:
-            data = compute_view(sig, view)
-        except Exception as exc:  # a broken probe must not stop the run
-            data = {"type": "message", "text": f"{type(exc).__name__}: {exc}"}
+        view = probe.get("view") or "auto"
+        if view not in views:
+            view = views[0] if views else ""
+        data = _safe_view(sig, view)
+        if all_views:
+            data["alt"] = {v: _safe_view(sig, v) for v in views if v != view}
         data.update(view=view, views=views, kind=sig.kind.label())
         out[out_key] = data
     return out
+
+
+def _safe_view(sig: Signal, view: str) -> dict[str, Any]:
+    try:
+        return compute_view(sig, view)
+    except Exception as exc:  # a broken probe must not stop the run
+        return {"type": "message", "text": f"{type(exc).__name__}: {exc}"}

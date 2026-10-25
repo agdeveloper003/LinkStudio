@@ -31,7 +31,7 @@ def _exp_correlation(n: int, rho: float) -> np.ndarray:
     return (v * np.sqrt(np.maximum(w, 0))) @ v.conj().T
 
 
-@register_block("stream_demux", category="demultiplexer", subcategory="Spatial", label="Stream Demultiplexer")
+@register_block("stream_demux", category="demultiplexer", label="Stream Demultiplexer")
 class StreamDemux(Block):
     """Spatial multiplexing: distribute symbols round-robin over ``n_streams`` antennas."""
 
@@ -50,7 +50,7 @@ class StreamDemux(Block):
         return {"out": x.evolve(np.ascontiguousarray(out), spatial_rate=nt, n_symbols=out.shape[-1])}
 
 
-@register_block("stream_mux", category="multiplexer", subcategory="Spatial", label="Stream Multiplexer")
+@register_block("stream_mux", category="multiplexer", label="Stream Multiplexer")
 class StreamMux(Block):
     """Inverse of ``stream_demux``: interleave the streams back into one sequence."""
 
@@ -112,7 +112,7 @@ def _per_symbol_h(H: np.ndarray, n: int) -> np.ndarray:
     return np.broadcast_to(H[:, None], (H.shape[0], n, *H.shape[1:])) if H.ndim == 3 else H
 
 
-@register_block("mimo_detector", category="detector", subcategory="MIMO Detection", label="MIMO Detector")
+@register_block("mimo_detector", category="detector", label="MIMO Detector")
 class MIMODetector(Block):
     """Linear (ZF, MMSE) or maximum-likelihood MIMO detection with known channel.
 

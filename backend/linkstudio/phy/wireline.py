@@ -27,7 +27,7 @@ _FOUR_B_FIVE_B = ["11110", "01001", "10100", "10101", "01010", "01011", "01110",
 FOUR_B_FIVE_B = np.array([[int(c) for c in w] for w in _FOUR_B_FIVE_B], dtype=np.uint8)  # (16, 5)
 
 
-@register_block("line_encoder", category="mapper", subcategory="Line Codes", label="Line Code Mapper (NRZ, AMI, MLT-3)")
+@register_block("line_encoder", category="mapper", label="Line Code Mapper (NRZ, AMI, MLT-3)")
 class LineEncoder(Block):
     """Baseband line code: bits -> real symbols.
 
@@ -64,7 +64,7 @@ class LineEncoder(Block):
         return {"out": Signal(s, Kind.SYMBOLS, fs=self.params.symbol_rate, meta=meta)}
 
 
-@register_block("line_decoder", category="demapper", subcategory="Line Codes", label="Line Code Demapper (NRZ, AMI, MLT-3)")
+@register_block("line_decoder", category="demapper", label="Line Code Demapper (NRZ, AMI, MLT-3)")
 class LineDecoder(Block):
     """Hard decisions for NRZ / Manchester / AMI / MLT-3 symbols (the real part is used)."""
 

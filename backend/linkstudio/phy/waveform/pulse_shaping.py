@@ -118,7 +118,7 @@ class MatchedFilter(Block):
         return {"out": Signal(z, Kind.SYMBOLS, fs=x.fs / sps if x.fs else None, meta=meta)}
 
 
-@register_block("upsampler", category="filter", subcategory="Resampling", label="Upsampler")
+@register_block("upsampler", category="filter", label="Upsampler")
 class Upsampler(Block):
     """Insert ``factor - 1`` zeros between samples."""
 
@@ -136,7 +136,7 @@ class Upsampler(Block):
                                     "power": (x.meta.get("power") or 1.0) / f})}
 
 
-@register_block("downsampler", category="filter", subcategory="Resampling", label="Downsampler")
+@register_block("downsampler", category="filter", label="Downsampler")
 class Downsampler(Block):
     """Keep one sample out of ``factor`` starting at ``offset``.
 
@@ -162,7 +162,7 @@ class Downsampler(Block):
                               meta={**x.meta, "sps": sps, "delay": delay, "pulse_taps": None})}
 
 
-@register_block("fir_filter", category="filter", subcategory="Filtering", label="FIR Filter")
+@register_block("fir_filter", category="filter", label="FIR Filter")
 class FIRFilter(Block):
     """Generic FIR filter with user-supplied taps (causal, output length preserved)."""
 

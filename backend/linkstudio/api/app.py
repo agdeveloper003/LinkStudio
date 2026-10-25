@@ -26,6 +26,7 @@ from linkstudio.api.probes import block_displays, compute_probes, scope_probes
 from linkstudio.api.response import block_response
 from linkstudio.core import Simulation, block_catalogue
 from linkstudio.core.parallel import cpu_count
+from linkstudio.phy.scopes import Scope
 
 BACKEND_DIR = Path(linkstudio.__file__).resolve().parents[1]
 SCENARIO_DIR = BACKEND_DIR / "scenarios"
@@ -181,12 +182,19 @@ def create_app() -> FastAPI:
 
         def step(sim: Simulation, probes: list, pending: list, reset: bool) -> dict[str, Any]:
             errors = []
+            changed = False
             for path, value in pending:
                 try:
                     sim.graph.set_param(path, value)
                 except Exception as exc:
                     errors.append(f"{path}: {exc}")
-            if pending or reset:  # restart the measurements after a change
+                # Choosing what a scope shows does not change the link.
+                changed |= not isinstance(sim.graph.blocks.get(path.partition(".")[0]), Scope)
+            for probe in probes:  # the scope view can change while running
+                scope = sim.graph.blocks.get(probe["scope"])
+                if scope is not None:
+                    probe["view"] = scope.params.view
+            if changed or reset:  # restart the measurements after a change
                 for block in sim.graph.blocks.values():
                     if block.metrics():
                         block.on_reset()

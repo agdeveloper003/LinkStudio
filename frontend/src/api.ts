@@ -118,7 +118,8 @@ export type BlockResponse =
       magnitude_db: (number | null)[]; phase_deg: (number | null)[]; group_delay_s: (number | null)[];
     };
 
-export type ProbeResult = PlotData & { view?: string; views?: string[]; kind?: string };
+/** Plot of a probe; ``alt`` holds the other views of the signal after a Simulate run. */
+export type ProbeResult = PlotData & { view?: string; views?: string[]; kind?: string; alt?: Record<string, PlotData> };
 
 export interface Job {
   id: string;

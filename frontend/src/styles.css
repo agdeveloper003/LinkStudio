@@ -187,6 +187,11 @@ body.resizing-block, body.resizing-block * { cursor: nwse-resize !important; use
   padding: 4px 7px; font-size: 11px; font-family: "JetBrains Mono", Consolas, monospace; white-space: nowrap; }
 .scope-selector-menu button.active { background: var(--panel-2); border-color: var(--accent); }
 .scope-ch { color: var(--muted); font-size: 10px; }
+.scope-view { position: absolute; top: 19px; left: 10px; z-index: 4; }
+.scope-view-button { display: flex; align-items: center; gap: 4px; padding: 0; border: none; background: transparent;
+  color: var(--c); font-size: 10.5px; line-height: 13px; white-space: nowrap; }
+.scope-view-button:hover { text-decoration: underline; }
+.scope-view .scope-selector-menu { left: 0; right: auto; min-width: 150px; }
 .scope-selector-empty { padding: 6px 8px; color: var(--muted); font-size: 11px; }
 
 /* BER meter: status LED and counters. */

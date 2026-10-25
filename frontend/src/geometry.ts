@@ -28,8 +28,8 @@ export interface Rect {
 
 export const portKey = (dir: "in" | "out", name: string) => `${dir}:${name}`;
 
-/** Scope blocks (``scope_*`` types) show their plot inside the block. */
-export const isScopeType = (type: string) => type.startsWith("scope_");
+/** The scope block shows its plot inside the block. */
+export const isScopeType = (type: string) => type === "scope";
 
 /** Default size of a block drawn with a display of its own; resizable ones keep the user's size. */
 export interface BodySpec {

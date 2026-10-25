@@ -21,7 +21,7 @@ def wilson_interval(errors: int, trials: int, z: float = 1.96) -> tuple[float, f
     return float(max(centre - half, 0.0)), float(min(centre + half, 1.0))
 
 
-@register_block("ber_meter", category="measurement", subcategory="Error Rate", label="BER Meter")
+@register_block("ber_meter", category="measurement", label="BER Meter")
 class BERMeter(Block):
     """Count bit, symbol and frame errors between transmitted and received bits.
 
@@ -80,7 +80,7 @@ class BERMeter(Block):
         return out
 
 
-@register_block("evm_meter", category="measurement", subcategory="Signal Quality", label="EVM Meter")
+@register_block("evm_meter", category="measurement", label="EVM Meter")
 class EVMMeter(Block):
     """Error vector magnitude and modulation error ratio between reference and received symbols."""
 
@@ -110,7 +110,7 @@ class EVMMeter(Block):
         return {"evm_pct": 100 * float(np.sqrt(ratio)), "mer_db": float(-10 * np.log10(max(ratio, 1e-300)))}
 
 
-@register_block("power_meter", category="measurement", subcategory="Power", label="Power Meter")
+@register_block("power_meter", category="measurement", label="Power Meter")
 class PowerMeter(Block):
     """Average power and peak-to-average power ratio of a waveform."""
 

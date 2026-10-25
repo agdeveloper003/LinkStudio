@@ -80,6 +80,12 @@ export function toEditorGraph(
   };
 }
 
+/** One scope block replaced the scope_time, scope_spectrum... blocks: their plot is now its view. */
+function migrateBlock(b: EditorGraph["blocks"][string]): EditorGraph["blocks"][string] {
+  if (!b.type.startsWith("scope_")) return b;
+  return { ...b, type: "scope", params: { ...b.params, view: b.type.slice("scope_".length) } };
+}
+
 export function fromEditorGraph(graph: EditorGraph, catalogue: Catalogue): { nodes: BlockNodeType[]; edges: Edge[] } {
   const ports = graph.validation?.ports ?? {};
   const probedBy: Record<string, string[]> = {};
@@ -88,6 +94,7 @@ export function fromEditorGraph(graph: EditorGraph, catalogue: Catalogue): { nod
     (probedBy[b] ??= []).push(port);
   }
   const nodes: BlockNodeType[] = Object.entries(graph.blocks).map(([name, b]) => {
+    b = migrateBlock(b);
     const fallback = portsFromCatalogue(catalogue.blocks[b.type]);
     const inst = ports[name];
     return {
