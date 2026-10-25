@@ -117,7 +117,7 @@ export function BlockView({ id, name = id, data, selected }: { id: string; name?
     return (
       <div
         className={`frameless-node display-${data.type}${selected ? " selected" : ""}${data.error ? " error" : ""}`}
-        style={{ width: size.w, height: size.h }}
+        style={{ width: size.w, height: size.h, ["--c" as string]: color }}
         title={`${id} - ${info?.label ?? data.type}`}
       >
         <span className="frameless-name">{name}</span>
@@ -135,7 +135,7 @@ export function BlockView({ id, name = id, data, selected }: { id: string; name?
   return (
     <div
       className={`block-node${scope ? " scope-node" : ""}${Display ? ` display-node display-${data.type}` : ""}${selected ? " selected" : ""}${data.error ? " error" : ""}`}
-      style={{ width: size.w, height: size.h }}
+      style={{ width: size.w, height: size.h, ["--c" as string]: color }}
     >
       <div className="block-node-header" style={{ borderTopColor: color }}>
         <span className="block-node-name">{name}</span>

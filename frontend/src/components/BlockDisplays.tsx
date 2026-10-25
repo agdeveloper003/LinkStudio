@@ -9,6 +9,7 @@ import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from
 import { BlockActionsContext, RunDataContext } from "../context";
 import type { BlockData } from "../graph";
 import { kindColor } from "../theme";
+import { ART, wavelengthColor } from "./BlockArt";
 import { ScopePlot } from "./plots/ProbeView";
 
 interface DisplayProps {
@@ -42,6 +43,7 @@ const DISPLAYS: Record<string, (p: DisplayProps) => ReactNode> = {
   optical_attenuator: (p) => <OpticalAttenuatorDisplay {...p} />,
   gain: (p) => <GainDisplay {...p} />,
   agc: (p) => <AgcDisplay {...p} />,
+  ...ART,
 };
 
 // ------------------------------------------------------------------ scope
@@ -548,16 +550,6 @@ function PrbsDisplay({ data, size }: DisplayProps) {
 }
 
 // ---------------------------------------------------------------- lasers
-
-/** Colour of a wavelength: its visible hue, or a red-to-violet glow across the infrared bands. */
-function wavelengthColor(nm: number): string {
-  if (nm >= 380 && nm <= 700) {
-    const hue = nm < 440 ? 270 : nm < 490 ? 240 - ((nm - 440) / 50) * 60 : nm < 580 ? 180 - ((nm - 490) / 90) * 120 : 60 - ((nm - 580) / 120) * 60;
-    return `hsl(${hue}, 95%, 60%)`;
-  }
-  const f = Math.min(Math.max((nm - 700) / 900, 0), 1); // 700 nm red ... 1600 nm violet
-  return `hsl(${355 - f * 85}, 90%, 64%)`;
-}
 
 const fmtNm = (nm: number) => `${+nm.toFixed(1)} nm`;
 

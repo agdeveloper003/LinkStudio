@@ -142,3 +142,20 @@ export function spread(nodes: BlockNodeType[]): BlockNodeType[] {
   }
   return nodes.map((n) => out.get(n.id)!);
 }
+
+/**
+ * After the automatic layout: the columns of the grid have a fixed pitch; move each column
+ * right of the widest block of the column before it, with a gap for the links.
+ */
+export function widen(nodes: BlockNodeType[]): BlockNodeType[] {
+  const GAP = 56;
+  const columns = [...new Set(nodes.map((n) => Math.round(n.position.x)))].sort((a, b) => a - b);
+  const shift = new Map<number, number>();
+  let x = columns[0] ?? 0;
+  for (const c of columns) {
+    shift.set(c, x);
+    const widest = Math.max(...nodes.filter((n) => Math.round(n.position.x) === c).map((n) => nodeRect(n).w));
+    x += widest + GAP;
+  }
+  return nodes.map((n) => ({ ...n, position: { x: shift.get(Math.round(n.position.x)) ?? n.position.x, y: n.position.y } }));
+}

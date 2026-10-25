@@ -36,7 +36,7 @@ import {
   uniqueName,
   type BlockNodeType,
 } from "./graph";
-import { nodeRect, snapPosition, spread, straighten, type Guide } from "./snap";
+import { nodeRect, snapPosition, spread, straighten, widen, type Guide } from "./snap";
 import { isScopeType } from "./geometry";
 import { kindColor, kindsCompatible } from "./theme";
 import { useLive } from "./useLive";
@@ -589,7 +589,7 @@ export default function App() {
     if (!nodes.length) return;
     try {
       const { positions } = await api.layout(getGraph());
-      setNodes((nds) => spread(straighten(nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n)), edges)));
+      setNodes((nds) => spread(straighten(widen(nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n))), edges)));
       window.setTimeout(() => flow.fitView({ padding: 0.15, duration: 300 }), 50);
     } catch (err) {
       notify(`Layout failed: ${err instanceof Error ? err.message : err}`, true);

@@ -230,7 +230,7 @@ body.resizing-block, body.resizing-block * { cursor: nwse-resize !important; use
 .mimo-array path { stroke: #cbd5e1; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .mimo-array .mimo-horn { stroke: #f87171; }
 .mimo-array .mimo-face { stroke: #f87171; stroke-width: 2.2; }
-.mimo-ray { stroke: #f87171; stroke-linecap: round; transition: stroke-opacity 0.2s, stroke-width 0.2s; }
+.mimo-ray { fill: none; stroke: #f87171; stroke-linecap: round; transition: stroke-opacity 0.2s, stroke-width 0.2s; }
 .mimo-ray:not(.live) { stroke-dasharray: 2 3; }
 .mimo-csi { stroke: #f87171; stroke-width: 1.2; fill: none; stroke-dasharray: 3 2; opacity: 0.7; }
 
@@ -548,3 +548,105 @@ input[type="range"].bits-slider {
 .splitter { fill: #1f2937; stroke: #64748b; stroke-width: 1; }
 .split-branch { fill: none; stroke: #facc15; stroke-width: 1.6; opacity: 0.3; stroke-dasharray: 3 2; }
 .split-branch.kept { opacity: 1; stroke-dasharray: none; }
+
+/* Drawings of the signal-processing blocks (BlockArt.tsx); --c is the class colour. */
+.art { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px; }
+.art-svg { flex: 1; min-height: 0; width: 100%; overflow: visible; }
+.art-svg text { font-family: Inter, system-ui, sans-serif; }
+.a-line { fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.a-mute { fill: none; stroke: #5b6578; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.a-line.thin, .a-mute.thin { stroke-width: 0.9; }
+.a-line.dash, .a-mute.dash { stroke-dasharray: 2.5 2; }
+.a-warn-line { fill: none; stroke: #fbbf24; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.a-warn-line.dash { stroke-dasharray: 3 2; }
+.a-fill { fill: var(--c); opacity: 0.16; stroke: none; }
+.a-cell { fill: #1c2230; stroke: #4b5568; stroke-width: 0.7; }
+.a-cell.on { fill: color-mix(in srgb, var(--c) 45%, #141922); stroke: var(--c); }
+.a-cell.off { fill: transparent; stroke: #3a4252; }
+.a-cell.dashed { stroke-dasharray: 2 1.5; }
+.a-cell.bad { fill: #5a1d24; stroke: #f87171; }
+.a-cell.ok { stroke: #4ade80; }
+.a-bar { fill: #3a4252; }
+.a-bar.on { fill: var(--c); opacity: 0.85; }
+.a-bar.pilot { fill: #fbbf24; }
+.a-box { fill: #171c27; stroke: var(--c); stroke-width: 1; }
+.a-node { fill: #171c27; stroke: var(--c); stroke-width: 1.1; }
+.a-tri { fill: color-mix(in srgb, var(--c) 35%, #141922); stroke: var(--c); stroke-width: 0.8; }
+.a-dot { fill: #8b95a7; }
+.a-dot.accent { fill: var(--c); }
+.a-dot.warn { fill: #fbbf24; }
+.a-dot.dim { fill: #5b6578; }
+.a-screen { fill: #0d1310; stroke: #263028; stroke-width: 0.8; }
+.a-hatch { fill: none; stroke: #0f141c; stroke-width: 1; opacity: 0.6; }
+.a-ok { fill: none; stroke: #4ade80; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.a-small { fill: #8792a6; font-size: 7.5px; font-weight: 600; }
+.a-tiny { fill: #c7cfdc; font-size: 6.5px; font-weight: 600; text-anchor: middle; font-family: "JetBrains Mono", Consolas, monospace !important; }
+.a-tiny.dim { fill: #5b6578; }
+.a-math { fill: #e2e8f0; font-size: 10px; font-weight: 600; text-anchor: middle; font-family: "Cambria Math", "Times New Roman", serif !important; font-style: italic; }
+.react-flow__node .a-line.pulse { stroke-dasharray: 3 3; animation: pump-flow 1.2s linear infinite; }
+
+/* EVM meter: cloud around the ideal points and the live readout. */
+.display-evm_meter .display-body { padding: 6px 26px 8px; }
+.evm-display { flex: 1; min-height: 0; display: flex; align-items: center; gap: 12px; }
+.evm-plot { height: 100%; max-height: 72px; aspect-ratio: 1; flex: none; }
+.evm-cloud { fill: var(--c); opacity: 0.22; }
+.evm-readout { flex: 1; display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px 8px; font-family: "JetBrains Mono", Consolas, monospace; }
+.evm-value { font-size: 17px; font-weight: 600; color: #fde68a; text-shadow: 0 0 6px rgba(253,230,138,0.35); text-align: right; }
+.evm-mer { font-size: 12px; color: var(--text); text-align: right; }
+
+/* Frameless physical blocks. */
+.art-label { fill: var(--muted); font: 600 8px Inter, system-ui, sans-serif; text-anchor: middle; }
+.rf-lead.thin { stroke-width: 1.2; }
+.sum-node { fill: #171c27; stroke: var(--c); stroke-width: 1.6; }
+.sum-plus { stroke: #e2e8f0; stroke-width: 1.5; stroke-linecap: round; }
+.noise-box { fill: #0d1310; stroke: #3a4252; stroke-width: 1; }
+.noise-trace { fill: none; stroke: #f87171; stroke-width: 1; opacity: 0.9; }
+.awgn-art.running .noise-trace { animation: noise-shake 0.18s steps(2) infinite; }
+@keyframes noise-shake { 50% { transform: scaleY(-1); transform-origin: center 12px; transform-box: fill-box; } }
+.noise-feed { fill: none; stroke: #f87171; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.lo-node { fill: #171c27; stroke: #94a3b8; stroke-width: 1.4; }
+.lo-wave { fill: none; stroke: var(--c); stroke-width: 1.3; }
+.delay-line { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-linejoin: round; }
+.rate-node { fill: #171c27; stroke: var(--c); stroke-width: 1.6; }
+.rate-text { fill: #e2e8f0; font: 700 11px "JetBrains Mono", Consolas, monospace; text-anchor: middle; }
+.pa-axis { fill: none; stroke: #5b6578; stroke-width: 0.8; }
+.pa-curve { fill: none; stroke: #fbbf24; stroke-width: 1.5; }
+.pair-a { fill: none; stroke: #fb923c; stroke-width: 2; }
+.pair-b { fill: none; stroke: #e2e8f0; stroke-width: 2; }
+.csi-lead { fill: none; stroke: var(--c); stroke-width: 1.1; stroke-dasharray: 3 2; opacity: 0.7; }
+.xt-arrow { fill: none; stroke: #fbbf24; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.bolt { fill: #fde047; stroke: #a16207; stroke-width: 0.8; stroke-linejoin: round; filter: drop-shadow(0 0 3px rgba(253, 224, 71, 0.6)); }
+.ray-dash { stroke: #5b6578; stroke-width: 1; stroke-dasharray: 2 3; }
+.fade-env { fill: none; stroke: var(--c); stroke-width: 1.6; }
+.scatterer { fill: #334155; stroke: #64748b; stroke-width: 0.8; }
+.mast { fill: none; stroke: #cbd5e1; stroke-width: 1.4; stroke-linejoin: round; }
+.wavefront { fill: none; stroke: var(--c); stroke-width: 1.5; }
+.ue { fill: #1e293b; stroke: #cbd5e1; stroke-width: 1.2; }
+.ue-screen { fill: #0ea5e9; opacity: 0.4; }
+.dist { fill: none; stroke: #5b6578; stroke-width: 0.9; }
+.fso-beam { fill: var(--beam); opacity: 0.22; }
+.laser-art.running .fso-beam { animation: laser-glow 0.9s ease-in-out infinite alternate; }
+.eddy { fill: none; stroke: #94a3b8; stroke-width: 1; opacity: 0.7; }
+.scope-tube { fill: #334155; stroke: #94a3b8; stroke-width: 1; stroke-linejoin: round; }
+.wdm-ch { fill: none; stroke-width: 1.8; }
+.awg { fill: #1f2937; stroke: #94a3b8; stroke-width: 1; stroke-linejoin: round; }
+.cw-laser { fill: #2a2f3a; stroke: #6b7280; stroke-width: 1; }
+.laser-glow.on { opacity: 0.55; }
+.cw-text { fill: #e2e8f0; font: 700 6.5px Inter, system-ui, sans-serif; text-anchor: middle; }
+.cw-text.dim { fill: var(--muted); }
+.waveguide { fill: none; stroke: #94a3b8; stroke-width: 2.2; stroke-linecap: round; }
+.waveguide.thin { stroke-width: 1.2; }
+.electrode { fill: none; stroke: #d6b25e; stroke-width: 4; stroke-linecap: round; }
+.eam { fill: #3b2f55; stroke: #a78bfa; stroke-width: 1; }
+.hybrid { fill: #1f2937; stroke: #94a3b8; stroke-width: 1.1; }
+
+/* Electrical power meter: analog gauge. */
+.gauge-case { fill: #2b313d; stroke: #11151c; stroke-width: 1.2; }
+.gauge-face { fill: #efe9d8; stroke: #8a8270; stroke-width: 1; }
+.gauge-tick { stroke: #3a3426; stroke-width: 1.1; }
+.gauge-red { fill: none; stroke: #dc2626; stroke-width: 2.5; }
+.gauge-scale { fill: #6b6350; font: 600 6.5px Inter, system-ui, sans-serif; text-anchor: middle; }
+.gauge-art .gauge-scale:last-of-type { fill: #9aa4b5; }
+.gauge-needle { stroke: #b91c1c; stroke-width: 1.6; stroke-linecap: round; transition: d 0.3s; }
+.gauge-hub { fill: #1f2937; }
+.gauge-value { fill: #e2e8f0; font: 700 11px "JetBrains Mono", Consolas, monospace; text-anchor: middle; }
