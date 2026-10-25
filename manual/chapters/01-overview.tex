@@ -27,8 +27,8 @@ The same scenario therefore runs identically from a Python script, the CLI or th
   \node[lay=accent5,below=of ui] (api) {\textbf{API} \hfill\file{linkstudio/api}\\
     FastAPI: REST (blocks, scenarios, validate, layout, export, jobs), WebSocket live mode, probes};
   \node[lay=accent3,below=of api] (phy) {\textbf{PHY library} \hfill\file{linkstudio/phy}\\
-    \numblocks{} registered blocks: sources, modulation, waveform, channel, sync, receiver, MIMO,
-    coding, wireline, optical, metrics; closed-form theory};
+    \numblocks{} registered blocks in functional classes (sources, encoders, mappers, modulators, media,
+    synchronization, equalizers, decoders, measurements, ...); closed-form theory};
   \node[lay=accent,below=of phy] (core) {\textbf{Core engine} \hfill\file{linkstudio/core}\\
     Signal, Block, Port, registry, Graph (validation, execution), Subsystem, Simulation,
     Sweep, Scenario (YAML)};

@@ -1226,8 +1226,16 @@ def _default(prop: dict) -> str:
 def generate_block_table() -> None:
     from linkstudio.core.registry import block_catalogue
     cat = block_catalogue()
-    order = ["source", "modulation", "waveform", "channel", "sync", "receiver", "mimo", "coding",
-             "wireline", "optical", "metrics"]
+    # Functional classes in signal-chain order, as in the GUI palette (frontend/src/theme.ts).
+    labels = {"source": "Sources", "encoder": "Encoders", "bit_processing": "Bit processing",
+              "mapper": "Mappers", "multiplexer": "Multiplexers", "framing": "Framing",
+              "modulator": "Modulators", "filter": "Filters and resamplers",
+              "amplifier": "Amplifiers and attenuators", "medium": "Transmission media",
+              "impairment": "Impairments", "demodulator": "Demodulators",
+              "synchronization": "Synchronization", "equalizer": "Equalizers",
+              "detector": "Detectors and estimators", "demultiplexer": "Demultiplexers",
+              "demapper": "Demappers", "decoder": "Decoders", "measurement": "Measurements"}
+    order = list(labels)
     by_cat: dict[str, list[str]] = {}
     for name, info in cat.items():
         by_cat.setdefault(info["category"], []).append(name)
@@ -1236,7 +1244,7 @@ def generate_block_table() -> None:
     for c in order + sorted(set(by_cat) - set(order)):
         if c not in by_cat:
             continue
-        out.append(f"\\blockcategory{{{tex_escape(c)}}}\n")
+        out.append(f"\\blockcategory{{{tex_escape(labels.get(c, c))}}}\n")
         for name in sorted(by_cat[c]):
             info = cat[name]
             total += 1

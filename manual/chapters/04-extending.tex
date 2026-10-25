@@ -25,7 +25,7 @@ from linkstudio.core import Block, BlockParams, Kind, Port, RunContext, Signal, 
 C_LIGHT = 299_792_458.0
 
 
-@register_block("free_space_loss", category="channel")
+@register_block("free_space_loss", category="medium", subcategory="Wireless", label="Free-Space Loss")
 class FreeSpaceLoss(Block):
     """Friis free-space path loss between isotropic antennas."""
 
@@ -58,7 +58,7 @@ To register it, import the module in the package \code{__init__.py}
 \begin{itemize}
   \item \code{g.create("pl", "free_space_loss", distance_m=500)} works from Python;
   \item \code{{type: free_space_loss, params: {distance_m: 500}}} works in YAML;
-  \item the block appears in the GUI palette under \emph{channel}, with a form for its two
+  \item the block appears in the GUI palette under \emph{Transmission media} $\to$ \emph{Wireless} as \emph{Free-Space Loss}, with a form for its two
   parameters;
   \item \code{pl.distance_m} can be swept;
   \item \code{pl.loss_db} is reported among the metrics.

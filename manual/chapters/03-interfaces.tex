@@ -10,12 +10,12 @@
   \draw[black!40,fill=black!3,rounded corners=2pt] (0,0) rectangle (14,8.2);
   % top bar
   \draw[accent,fill=soft] (0.1,7.5) rectangle (13.9,8.1);
-  \node[anchor=west] at (0.2,7.8) {\textbf{scenario name} \quad New \quad Save \quad Save as \quad Undo/Redo \quad Layout \quad Export .py \quad seed};
+  \node[anchor=west] at (0.2,7.8) {\textbf{scenario name} \quad New \quad Save \quad Save as \quad Undo/Redo \quad Layout \quad ? \quad Export .py \quad seed};
   \node[anchor=east,accent3] at (13.8,7.8) {\textbf{valid}};
   % palette
   \draw[accent4,fill=accent4!6] (0.1,2.9) rectangle (2.6,7.4);
   \node[align=center] at (1.35,6.95) {\textbf{Blocks}\\search};
-  \foreach \y/\t in {6.2/source,5.75/modulation,5.3/waveform,4.85/channel,4.4/sync,3.95/coding,3.5/optical}
+  \foreach \y/\t in {6.2/sources,5.75/encoders,5.3/mappers,4.85/modulators,4.4/media,3.95/decoders,3.5/measurements}
     \node[draw=black!25,fill=white,minimum width=2.1cm,minimum height=3.5mm] at (1.35,\y) {\t};
   % canvas
   \draw[black!30,fill=white] (2.7,2.9) rectangle (10.6,7.4);
@@ -28,7 +28,7 @@
   \draw[black!30,fill=black!5] (9.2,3.0) rectangle (10.5,3.8); \node at (9.85,3.4) {minimap};
   % inspector
   \draw[accent2,fill=accent2!5] (10.7,2.9) rectangle (13.9,7.4);
-  \node[align=left,anchor=north west] at (10.8,7.3) {\textbf{Inspector}\\[2pt] name\\ parameters (forms,\\ sliders, \texttt{auto})\\ probes to show\\[3pt] Duplicate \;\; Delete\\[3pt] shortcuts};
+  \node[align=left,anchor=north west] at (10.8,7.3) {\textbf{Inspector}\\[2pt] name\\ parameters (forms,\\ sliders, \texttt{auto})\\ frequency response\\[3pt] Flip \;\; Duplicate\\ Delete};
   % dock
   \draw[accent3,fill=accent3!6] (0.1,0.1) rectangle (13.9,2.8);
   \node[anchor=north west] at (0.2,2.75) {\textbf{Live} \quad Simulate \quad Sweep};
@@ -41,31 +41,101 @@ modes.}
 \label{fig:gui-layout}
 \end{figure}
 
+\paragraph{Palette.}
+The \numblocks{} blocks are grouped by functional class in signal-chain order: sources, encoders, bit
+processing, mappers, multiplexers, framing, modulators, filters and resamplers, amplifiers and
+attenuators, transmission media, impairments, then the receiver classes (demodulators,
+synchronization, equalizers, detectors and estimators, demultiplexers, demappers, decoders) and
+the measurements. Complementary classes (encoders and decoders, mappers and demappers, \dots)
+share a colour. Only the large classes are split into subclasses (code families, media); the
+others are flat lists. Every block draws its function on the canvas: codewords with parity, the
+shift register and trellis of convolutional codes, the Tanner graph, the interleaver permutation
+drawn from its seed (or the block matrix numbered in write order), the scrambler LFSR with its
+real taps and seed, pulse shapes, constellations, and the physical blocks (adders, mixers,
+antennas, fibers, lasers) as drawings without a frame.
+
 \paragraph{Editing.}
 \begin{itemize}
   \item \textbf{Adding blocks:} drag a block from the palette or double-click it.
-  \item \textbf{Connecting:} drag from an output handle to an input handle (by default outputs
-  are on the right and inputs on the left). Handle colours are the signal kinds of
-  \cref{tab:kinds}; incompatible connections are refused, and dashed handles are optional inputs.
-  \item \textbf{Moving ports:} Ctrl + drag a handle to move it anywhere on the block border (any
-  side), so that feedback paths and chains drawn right to left stay readable. Port places are
-  saved in the scenario (\code{port_layout}).
+  \item \textbf{Connecting:} drag from an output handle to an input handle. Handle colours are
+  the signal kinds of \cref{tab:kinds}; incompatible connections are refused, and dashed
+  handles are optional inputs.
+  \item \textbf{Selection:} click a block; Shift or Ctrl + click adds blocks, Shift + drag on
+  the empty canvas selects the blocks in a box, Ctrl+A selects all and Esc clears the
+  selection. With several blocks selected a bar over the canvas offers \emph{Align row} (the
+  links between them become straight), \emph{Align column}, \emph{Distribute} (equal gaps),
+  \emph{Flip}, \emph{Duplicate} and \emph{Delete}.
+  \item \textbf{Clipboard:} Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste blocks with the
+  connections between them; the copy is placed at the mouse and pasting again steps the
+  copies. Ctrl+D duplicates, Delete deletes, the arrow keys move the selection (Shift + arrow
+  by a larger step).
+  \item \textbf{Direction:} a block faces right (inputs on the left, outputs on the right) or
+  left. F, or \emph{Flip} in the inspector, turns the selected blocks around. A block dragged
+  to the other side of the blocks it is linked to turns around by itself, so a chain can run
+  right to left or turn back on itself without moving any port. The block drawings are
+  mirrored with the block; their text stays readable and plots against time or frequency keep
+  their axes.
+  \item \textbf{Moving ports:} Ctrl + drag a handle to move it anywhere on the block border,
+  e.g.\ for feedback paths. Port places and directions are saved in the scenario
+  (\code{port_layout}).
   \item \textbf{Alignment:} while a block is dragged it snaps so that its connected ports line
   up with the ports at the other end (straight links), or else so that its edges or centre line
-  up with a neighbouring block; a guide line shows the alignment. The automatic layout also
-  straightens single-input links.
-  \item \textbf{Links} are drawn with orthogonal segments routed around the blocks
-  (A$^\ast$ search on a sparse grid of block edges and channels, with a penalty per bend), so they
-  never pass behind a block.
+  up with a neighbouring block; a guide line shows the alignment.
+  \item \textbf{Automatic layout} (Ctrl+L) arranges the blocks along the signal flow
+  (\cref{fig:auto-layout}). Each block goes in the column given by its longest distance from a
+  source, and sources that feed late blocks are pulled forward. The longest path (the main
+  chain) stays on one straight line. Branches such as training sequences, channel estimates
+  and meters go in lanes under it, ordered by barycentre sweeps to reduce crossings. A long
+  chain wraps into rows sized from the shape of the canvas and run alternately left to right
+  and right to left (a horseshoe); the blocks of the reversed rows face left. Scopes and meters
+  that tap a link from their bottom side sit above the gap after the block they tap.
+  Unconnected blocks go in a last row.
+  \item \textbf{Links} are drawn with orthogonal segments routed around the blocks (A$^\ast$
+  search on a sparse grid of block edges and channels, with a penalty per bend), so they never
+  pass behind a block. All links are routed together. Where links of different nets would run
+  on top of each other along a channel, their shared segments are moved apart so that each
+  link stays visible.
   \item \textbf{Inspector:} parameter forms are generated from each block's schema. Bounded and
   dB-valued parameters get sliders, and \code{auto} leaves a value to upstream metadata. For
   linear blocks the inspector also plots the \emph{frequency response} (magnitude, phase or group
   delay): the model transfer function of cables, CTLE, lasers and VCSELs, photodiodes, single-
   and multimode fibers and pulse shapers, and an estimate $\hat H=S_{xy}/S_{xx}$ of one
   realization for random multipath channels.
-  \item \textbf{Shortcuts:} Ctrl+Z/Y (undo/redo), Ctrl+C/V/D (copy, paste, duplicate, with
-  internal edges), Ctrl+L (automatic layout), Ctrl+S (save), Ctrl+O (scenario browser).
+  \item \textbf{Undo:} Ctrl+Z and Ctrl+Y undo and redo any change: blocks, connections,
+  parameters, positions, port places and directions, scopes.
+  \item \textbf{Shortcuts:} ? (or the ? button) lists them all. Besides those above: Ctrl+S
+  saves, Ctrl+Shift+S saves as, Ctrl+O opens the scenario browser, Ctrl+B and Ctrl+I show or hide
+  the block palette and the inspector.
+  Saving keeps the run settings (\code{simulation}, \code{sweep}) and the ports of a subsystem
+  file, so a scenario saved from the GUI runs the same from the command line.
 \end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\sffamily\scriptsize,
+    b/.style={draw=accent,fill=soft,rounded corners=1pt,minimum width=1.25cm,minimum height=6mm},
+    l/.style={->,thick,black!60}]
+  \foreach \i/\t in {0/src,1/enc,2/map,3/mod,4/tx}
+    \node[b] (r\i) at (1.9*\i,2) {\t};
+  \foreach \i/\t in {4/fiber,3/rx,2/eq,1/demap,0/dec}
+    \node[b] (q\i) at (1.9*\i,0) {\t};
+  \node[b,draw=gray,fill=gray!8] (ber) at (-1.9,0) {ber};
+  \node[b,draw=gray,fill=gray!8,minimum width=1cm] (sc) at (2.85,2.9) {scope};
+  \foreach \i/\j in {0/1,1/2,2/3,3/4} \draw[l] (r\i) -- (r\j);
+  \draw[l] (r4.east) -- ++(0.35,0) |- (q4.east);
+  \foreach \i/\j in {4/3,3/2,2/1,1/0} \draw[l] (q\i) -- (q\j);
+  \draw[l] (q0) -- (ber);
+  \draw[l] (r0.south) -- ++(0,-0.4) -| (ber.north);
+  \fill[black!60] (2.85,2) circle (1.3pt);
+  \draw[thick,black!60] (2.85,2) -- (sc.south);
+  \node[anchor=west,commentcolor] at (8.9,2) {row 1: faces right};
+  \node[anchor=west,commentcolor] at (8.9,0) {row 2: faces left};
+\end{tikzpicture}
+\caption{Automatic layout of a long chain: it wraps into a second row that runs right to left
+with its blocks facing left. A scope tapping a link from its bottom side sits above it.}
+\label{fig:auto-layout}
+\end{figure}
+
 The run buttons are disabled while the graph is invalid, and the validator's message is shown
 next to them.
 
@@ -84,16 +154,20 @@ next to them.
   overlaid, and the results exported as CSV or PNG.
 \end{description}
 
-\paragraph{Probes and views.}
-Ticking an output in the inspector adds a scope for it. The available views depend on the
-signal kind.
+\paragraph{The Scope block.}
+Signals are displayed by the \blk{scope} block (class \emph{measurements}), an instrument with a
+screen. Its inputs enter from the bottom side: drop the scope from the palette onto a link, or
+drag one of its free inputs onto a link, to tap the output that feeds it. The tap is drawn as a
+junction dot just after that output. A scope has up to four inputs; the selector in its corner
+chooses the displayed one, and the bottom-right corner resizes it. The plot selector under its
+name (parameter \prm{view}) lists the views that suit the displayed signal:
 \begin{center}\small
 \begin{tabular}{@{}ll@{}}
 \toprule
-Kind & Views\\
+Kind & Views (the first is the \code{auto} choice)\\
 \midrule
-\kind{SYMBOLS} & constellation, time, spectrum\\
 \kind{SAMPLES} & spectrum (Welch), constellation, eye diagram, time\\
+\kind{SYMBOLS} & constellation, time, spectrum\\
 \kind{GRID} & constellation, resource-grid magnitude\\
 \kind{CSI} & impulse / frequency response\\
 \kind{LLR} & histogram, time\\
@@ -101,6 +175,12 @@ Kind & Views\\
 \bottomrule
 \end{tabular}
 \end{center}
+A view that does not suit the signal falls back to the first one of its kind. After a
+\emph{Simulate} run every view is already computed, so switching needs no new run; in
+\emph{Live} the next frame shows the new view, and the measurements are not restarted. Older
+scenarios with one scope type per view (\code{scope_constellation}, \dots) are converted to
+\blk{scope} with the matching view when they are loaded.
+
 Axes carry physical units. The server sends values in base SI units together with their unit,
 taken from the \meta{unit} metadata: $\sqrt{\mathrm{W}}$ for optical fields, A
 for photocurrents, none for normalized baseband signals. The editor picks the SI prefix
@@ -123,7 +203,7 @@ GET  & \code{/api/blocks} & block catalogue: documentation, ports, parameter JSO
 GET  & \code{/api/scenarios} & scenario list with name, category, description, block count\\
 GET/PUT & \code{/api/scenarios/{path}} & load / save a scenario in editor format\\
 POST & \code{/api/validate} & validate an editor graph; returns errors and port kinds\\
-POST & \code{/api/layout} & automatic layout of the blocks\\
+POST & \code{/api/layout} & server-side layout (the editor lays out locally)\\
 POST & \code{/api/export/python} & standalone Python script equivalent to the graph\\
 POST & \code{/api/response} & frequency response of one block (magnitude, phase, group delay)\\
 POST & \code{/api/jobs} & start a simulate or sweep job\\

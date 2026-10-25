@@ -133,12 +133,14 @@ GUI, the CLI or a script.
 
 % ------------------------------------------------------------------
 \section{The registry}
-\code{@register_block("type_name", category=...)} adds a class to a global registry
+\code{@register_block("type_name", category=..., subcategory=..., label=...)} adds a class to a global registry
 (\file{core/registry.py}). Registered blocks can be created by name (\code{create_block},
 \code{Graph.create}) and are described by \code{block_catalogue()}. The catalogue contains
 the documentation, the ports and the JSON Schema of the parameters. The GUI builds its palette
 and its parameter forms from this catalogue, and \cref{app:blocks} of this manual is generated
-from it.
+from it. The \emph{category} is the functional class of the block in the palette (\code{encoder},
+\code{modulator}, \code{medium}, \code{measurement}, \dots); the optional \emph{subcategory} splits the
+large classes (code families, wireless / wireline / optical media) and \emph{label} is the readable name.
 
 % ------------------------------------------------------------------
 \section{Graphs}\label{sec:graphs}
