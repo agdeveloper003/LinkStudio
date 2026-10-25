@@ -5,6 +5,7 @@ Editor graph format::
     {
       "name": "qpsk", "seed": 1, "batch_size": 32,
       "blocks": {"awgn": {"type": "awgn", "params": {...all params...}, "position": {"x": 0, "y": 0},
+                          "size": {"w": 280, "h": 240},  # optional, resized blocks only
                           "ports": {"in": {"side": "left", "offset": 0.5}}},
                  "tx":   {"type": "subsystem", "spec": {"file": "subsystems/tx.yaml"}, ...}},
       "edges": [{"source": "map.out", "target": "awgn.in"}],
@@ -107,6 +108,7 @@ def spec_to_editor(spec: dict[str, Any], base_dir: Path) -> dict[str, Any]:
     for name, block in graph.blocks.items():
         p = layout.get(name)
         position = {"x": float(p[0]), "y": float(p[1])} if p else auto[name]
+        size = {"w": float(p[2]), "h": float(p[3])} if p and len(p) >= 4 else None
         if block.is_composite:
             raw = dict(spec["blocks"][name])
             raw.pop("type", None)
@@ -114,6 +116,8 @@ def spec_to_editor(spec: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         else:
             blocks[name] = {"type": block.type_name, "params": block.params.model_dump(mode="json"),
                             "position": position}
+        if size:
+            blocks[name]["size"] = size
         if port_layout.get(name):
             blocks[name]["ports"] = {port: {"side": side, "offset": float(offset)}
                                      for port, (side, offset) in port_layout[name].items()}
@@ -193,6 +197,8 @@ def editor_to_yaml_dict(editor: dict[str, Any]) -> dict[str, Any]:
         pos = b.get("position")
         if pos:
             layout[name] = [round(float(pos["x"]), 1), round(float(pos["y"]), 1)]
+            if b.get("size"):  # resized block (scopes, displays): [x, y, w, h]
+                layout[name] += [round(float(b["size"]["w"]), 1), round(float(b["size"]["h"]), 1)]
         if b.get("ports"):
             port_layout[name] = {port: [v["side"], round(float(v["offset"]), 3)] for port, v in b["ports"].items()}
     out: dict[str, Any] = {"name": editor.get("name", "scenario")}

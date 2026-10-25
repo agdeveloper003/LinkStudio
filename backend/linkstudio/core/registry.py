@@ -19,8 +19,14 @@ _BUILTIN_PACKAGES = ("linkstudio.phy",)
 _builtins_loaded = False
 
 
-def register_block(type_name: str, category: str) -> Callable[[B], B]:
-    """Class decorator registering a block under ``type_name``."""
+def register_block(type_name: str, category: str, subcategory: str = "", label: str = "") -> Callable[[B], B]:
+    """Class decorator registering a block under ``type_name``.
+
+    ``category`` is the functional class of the block in a communication chain
+    (``encoder``, ``modulator``, ``medium``...), ``subcategory`` the specific kind
+    within it and ``label`` the readable name shown in the UI (defaults to the
+    title-cased ``type_name``).
+    """
 
     def decorator(cls: B) -> B:
         existing = _REGISTRY.get(type_name)
@@ -28,6 +34,8 @@ def register_block(type_name: str, category: str) -> Callable[[B], B]:
             raise BlockError(f"Block type '{type_name}' is already registered by {existing.__name__}.")
         cls.type_name = type_name
         cls.category = category
+        cls.subcategory = subcategory
+        cls.label = label or type_name.replace("_", " ").title()
         _REGISTRY[type_name] = cls
         return cls
 
@@ -68,6 +76,8 @@ def block_catalogue() -> dict[str, dict[str, Any]]:
         cls = _REGISTRY[name]
         catalogue[name] = {
             "category": cls.category,
+            "subcategory": cls.subcategory,
+            "label": cls.label,
             "doc": (cls.__doc__ or "").strip(),
             "inputs": {p: {"kinds": port.kinds.label(), "required": port.required, "doc": port.doc}
                        for p, port in cls.inputs.items()},

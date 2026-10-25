@@ -108,7 +108,7 @@ class _PolarBase(Block):
         self.info = np.nonzero(~self.frozen)[0]
 
 
-@register_block("polar_encoder", category="coding")
+@register_block("polar_encoder", category="encoder", subcategory="Block Codes", label="Polar Encoder")
 class PolarEncoder(_PolarBase):
     """Polar encoder (frame length must be a multiple of k)."""
 
@@ -127,7 +127,7 @@ class PolarEncoder(_PolarBase):
         return {"out": x.evolve(cw, code_rate=x.meta.get("code_rate", 1.0) * p.k / p.block_length)}
 
 
-@register_block("polar_decoder", category="coding")
+@register_block("polar_decoder", category="decoder", subcategory="Block Codes", label="Polar SC Decoder")
 class PolarDecoder(_PolarBase):
     """Successive-cancellation polar decoder (soft LLR or hard input)."""
 

@@ -13,7 +13,7 @@ from linkstudio.phy.dsp.filters import design_pulse, fir_filter, upsample
 PulseShape = Literal["rrc", "rc", "gaussian", "rect"]
 
 
-@register_block("pulse_shaper", category="waveform")
+@register_block("pulse_shaper", category="modulator", subcategory="Pulse Shaping", label="Pulse Shaper")
 class PulseShaper(Block):
     """Upsample symbols by ``sps`` and filter them with a unit-energy pulse.
 
@@ -53,7 +53,7 @@ class PulseShaper(Block):
             "delay": x.meta.get("delay", 0.0) + (len(self.taps) - 1) / 2})}
 
 
-@register_block("matched_filter", category="waveform")
+@register_block("matched_filter", category="demodulator", subcategory="Matched Filtering", label="Matched Filter")
 class MatchedFilter(Block):
     """Receive filter + symbol-rate sampling.
 
@@ -118,7 +118,7 @@ class MatchedFilter(Block):
         return {"out": Signal(z, Kind.SYMBOLS, fs=x.fs / sps if x.fs else None, meta=meta)}
 
 
-@register_block("upsampler", category="waveform")
+@register_block("upsampler", category="filter", subcategory="Resampling", label="Upsampler")
 class Upsampler(Block):
     """Insert ``factor - 1`` zeros between samples."""
 
@@ -136,7 +136,7 @@ class Upsampler(Block):
                                     "power": (x.meta.get("power") or 1.0) / f})}
 
 
-@register_block("downsampler", category="waveform")
+@register_block("downsampler", category="filter", subcategory="Resampling", label="Downsampler")
 class Downsampler(Block):
     """Keep one sample out of ``factor`` starting at ``offset``.
 
@@ -162,7 +162,7 @@ class Downsampler(Block):
                               meta={**x.meta, "sps": sps, "delay": delay, "pulse_taps": None})}
 
 
-@register_block("fir_filter", category="waveform")
+@register_block("fir_filter", category="filter", subcategory="Filtering", label="FIR Filter")
 class FIRFilter(Block):
     """Generic FIR filter with user-supplied taps (causal, output length preserved)."""
 

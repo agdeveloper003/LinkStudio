@@ -12,7 +12,7 @@ interface Props {
   color?: string;
 }
 
-/** I/Q scatter plot with equal axes, scaled to the signal (SI-prefixed amplitude). */
+/** I/Q scatter plot with equal axis scales filling the area, scaled to the signal (SI-prefixed amplitude). */
 export function Constellation({ i, q, unit, refI, refQ, color = "#34d399" }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -30,9 +30,12 @@ export function Constellation({ i, q, unit, refI, refQ, color = "#34d399" }: Pro
     const L = lim * s.factor;
 
     ctx.clearRect(0, 0, width, height);
-    const f = plotFrame(width, height, true);
-    const { toX, toY } = drawAxes(ctx, f, { lo: -L, hi: L, label: axisLabel("In-phase", s.unit) },
-      { lo: -L, hi: L, label: axisLabel("Quadrature", s.unit) });
+    // Fill the whole area with the same scale on both axes: the longer side shows more range.
+    const f = plotFrame(width, height);
+    const LX = f.width >= f.height ? (L * f.width) / f.height : L;
+    const LY = f.width >= f.height ? L : (L * f.height) / f.width;
+    const { toX, toY } = drawAxes(ctx, f, { lo: -LX, hi: LX, label: axisLabel("In-phase", s.unit) },
+      { lo: -LY, hi: LY, label: axisLabel("Quadrature", s.unit) });
 
     ctx.save();
     ctx.beginPath();

@@ -133,7 +133,7 @@ class _LDPCParams(BlockParams):
     seed: int = Field(1, description="Seed of the code construction.")
 
 
-@register_block("ldpc_encoder", category="coding")
+@register_block("ldpc_encoder", category="encoder", subcategory="Block Codes", label="LDPC Encoder")
 class LDPCEncoder(Block):
     """Systematic quasi-cyclic LDPC encoder (frame length must be a multiple of k)."""
 
@@ -155,7 +155,7 @@ class LDPCEncoder(Block):
         return {"out": x.evolve(cw, code_rate=x.meta.get("code_rate", 1.0) * self.code.rate)}
 
 
-@register_block("ldpc_decoder", category="coding")
+@register_block("ldpc_decoder", category="decoder", subcategory="Block Codes", label="LDPC Decoder")
 class LDPCDecoder(Block):
     """Belief-propagation LDPC decoder (normalized min-sum or sum-product) with early stopping."""
 

@@ -31,7 +31,7 @@ def _exp_correlation(n: int, rho: float) -> np.ndarray:
     return (v * np.sqrt(np.maximum(w, 0))) @ v.conj().T
 
 
-@register_block("stream_demux", category="mimo")
+@register_block("stream_demux", category="demultiplexer", subcategory="Spatial", label="Stream Demultiplexer")
 class StreamDemux(Block):
     """Spatial multiplexing: distribute symbols round-robin over ``n_streams`` antennas."""
 
@@ -50,7 +50,7 @@ class StreamDemux(Block):
         return {"out": x.evolve(np.ascontiguousarray(out), spatial_rate=nt, n_symbols=out.shape[-1])}
 
 
-@register_block("stream_mux", category="mimo")
+@register_block("stream_mux", category="multiplexer", subcategory="Spatial", label="Stream Multiplexer")
 class StreamMux(Block):
     """Inverse of ``stream_demux``: interleave the streams back into one sequence."""
 
@@ -68,7 +68,7 @@ class StreamMux(Block):
         return {"out": x.evolve(out, noise_var=nv, n_symbols=out.shape[-1], spatial_rate=1)}
 
 
-@register_block("mimo_channel", category="channel")
+@register_block("mimo_channel", category="medium", subcategory="Wireless", label="MIMO Channel")
 class MIMOChannel(Block):
     """Flat Rayleigh MIMO channel y = H x, H of size Nr x Nt, normalized by 1/sqrt(Nt).
 
@@ -112,7 +112,7 @@ def _per_symbol_h(H: np.ndarray, n: int) -> np.ndarray:
     return np.broadcast_to(H[:, None], (H.shape[0], n, *H.shape[1:])) if H.ndim == 3 else H
 
 
-@register_block("mimo_detector", category="receiver")
+@register_block("mimo_detector", category="detector", subcategory="MIMO Detection", label="MIMO Detector")
 class MIMODetector(Block):
     """Linear (ZF, MMSE) or maximum-likelihood MIMO detection with known channel.
 
@@ -162,7 +162,7 @@ class MIMODetector(Block):
         return {"out": x.evolve(s.transpose(0, 2, 1), noise_var=nv.transpose(0, 2, 1))}
 
 
-@register_block("alamouti_encoder", category="mimo")
+@register_block("alamouti_encoder", category="encoder", subcategory="Space-Time Codes", label="Alamouti Encoder")
 class AlamoutiEncoder(Block):
     """Alamouti space-time block code: 2 transmit antennas, rate 1, full diversity."""
 
@@ -180,7 +180,7 @@ class AlamoutiEncoder(Block):
         return {"out": x.evolve(out, spatial_rate=1)}
 
 
-@register_block("alamouti_decoder", category="mimo")
+@register_block("alamouti_decoder", category="decoder", subcategory="Space-Time Codes", label="Alamouti Decoder")
 class AlamoutiDecoder(Block):
     """Linear Alamouti combining with known (block-fading) channel and any number of RX antennas."""
 

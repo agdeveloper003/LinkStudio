@@ -25,7 +25,7 @@ def _keep_mask(pattern: list[int], n: int) -> np.ndarray:
     return np.resize(np.asarray(pattern, dtype=bool), n)
 
 
-@register_block("puncturer", category="coding")
+@register_block("puncturer", category="encoder", subcategory="Rate Matching", label="Puncturer")
 class Puncturer(Block):
     """Remove coded bits according to a periodic pattern (raises the code rate)."""
 
@@ -41,7 +41,7 @@ class Puncturer(Block):
         return {"out": x.evolve(out, code_rate=rate, punctured_length=x.length)}
 
 
-@register_block("depuncturer", category="coding")
+@register_block("depuncturer", category="decoder", subcategory="Rate Matching", label="Depuncturer")
 class Depuncturer(Block):
     """Re-insert punctured positions as erasures (LLR = 0) before decoding."""
 

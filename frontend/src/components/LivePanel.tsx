@@ -1,52 +1,56 @@
-import type { Probe } from "../api";
+import { useState } from "react";
 import type { LiveState } from "../useLive";
-import { MetricsTable, ScopeGrid } from "./common";
+import { FloatingWindow, MetricsTable, ResultsToggle, SettingsMenu } from "./common";
 
 interface Props {
   live: LiveState;
-  probes: Probe[];
   onStart: () => void;
-  onView: (key: string, view: string) => void;
-  onRemoveProbe: (key: string) => void;
   blocked?: string;
+  /** This mode is the one selected in the top bar. */
+  active: boolean;
 }
 
-export function LivePanel({ live, probes, onStart, onView, onRemoveProbe, blocked }: Props) {
+/** Live mode controls for the top bar, with the metrics in a floating window. */
+export function LivePanel({ live, onStart, blocked, active }: Props) {
+  const [showResults, setShowResults] = useState(false);
+  if (!active) return null;
+
   return (
-    <div className="run-panel">
-      <div className="run-controls">
-        {live.running ? (
-          <button className="danger" onClick={live.stop}>■ Stop</button>
-        ) : (
-          <button className="primary" onClick={onStart} disabled={!!blocked} title={blocked}>▶ Start live</button>
-        )}
-        {blocked && <span className="field-error blocked">{blocked}</span>}
+    <>
+      {live.running ? (
+        <button className="danger" onClick={live.stop}>■ Stop</button>
+      ) : (
+        <button
+          className="primary"
+          onClick={() => {
+            onStart();
+            setShowResults(true);
+          }}
+          disabled={!!blocked}
+          title={blocked ?? "One frame per step. Parameters changed in the inspector are applied while running."}
+        >
+          ▶ Start
+        </button>
+      )}
+      <SettingsMenu title="Live settings">
         <label className="inline">
           rate
-          <input
-            type="range"
-            min={1}
-            max={30}
-            value={live.rate}
-            onChange={(e) => live.setRate(Number(e.target.value))}
-          />
+          <input type="range" min={1} max={30} value={live.rate} onChange={(e) => live.setRate(Number(e.target.value))} />
           <span className="mono">{live.rate} Hz</span>
         </label>
         <button onClick={live.resetMetrics} disabled={!live.running}>Reset metrics</button>
-        <span className="muted small">
-          {live.running
-            ? `frame ${live.frame?.batch ?? 0} · ${live.frame?.step_ms ?? "–"} ms/frame`
-            : "One frame per step. Parameters changed in the inspector are applied while running."}
-        </span>
-        {live.error && <span className="field-error">{live.error}</span>}
-      </div>
-      <div className="run-body">
-        <div className="run-side">
-          <div className="section-title">Metrics</div>
+        <p className="muted small">One frame per step. Parameters changed in the inspector are applied while running.</p>
+      </SettingsMenu>
+      <ResultsToggle open={showResults} onToggle={() => setShowResults(!showResults)} error={live.error ?? undefined} />
+      {showResults && (
+        <FloatingWindow id="live" title="Live metrics" initial={{ x: 260, y: 70, w: 340, h: 320 }} onClose={() => setShowResults(false)}>
+          <div className="muted small mono float-status">
+            {live.running ? `frame ${live.frame?.batch ?? 0} · ${live.frame?.step_ms ?? "–"} ms/frame` : "stopped"}
+          </div>
+          {live.error && <div className="field-error">{live.error}</div>}
           <MetricsTable metrics={live.frame?.metrics} />
-        </div>
-        <ScopeGrid probes={probes} data={live.frame?.probes} onView={onView} onRemove={onRemoveProbe} />
-      </div>
-    </div>
+        </FloatingWindow>
+      )}
+    </>
   );
 }

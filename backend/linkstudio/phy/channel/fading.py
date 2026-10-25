@@ -86,7 +86,7 @@ def sum_of_sinusoids(rng: np.random.Generator, batch: int, n: int, doppler_norm:
     return (xc + 1j * xs) * np.sqrt(2 / m)
 
 
-@register_block("flat_fading", category="channel")
+@register_block("flat_fading", category="medium", subcategory="Wireless", label="Flat Fading")
 class FlatFading(Block):
     """Frequency-flat Rayleigh or Rician fading, E|h|^2 = 1.
 
@@ -128,7 +128,7 @@ class FlatFading(Block):
         return {"out": x.evolve(x.data * h), "csi": csi}
 
 
-@register_block("multipath", category="channel")
+@register_block("multipath", category="medium", subcategory="Wireless", label="Multipath Fading")
 class MultipathChannel(Block):
     """Tapped-delay-line channel (frequency selective).
 

@@ -22,7 +22,7 @@ from linkstudio.api.editor import (
     auto_layout_editor, build_graph, editor_to_python, editor_to_yaml_dict, spec_to_editor, validate_editor,
 )
 from linkstudio.api.jobs import THEORY_CURVES, JobManager, _clean
-from linkstudio.api.probes import compute_probes
+from linkstudio.api.probes import block_displays, compute_probes, scope_probes
 from linkstudio.api.response import block_response
 from linkstudio.core import Simulation, block_catalogue
 from linkstudio.core.parallel import cpu_count
@@ -148,7 +148,7 @@ def create_app() -> FastAPI:
 
         Live mode always simulates a single frame per step (batch size 1): the scopes show
         one frame and the metrics accumulate across steps. Client messages: ``start`` {graph, rate}, ``set_param`` {path, value},
-        ``probes`` {probes}, ``reset``, ``stop``.
+        ``reset``, ``stop``. The scope blocks of the graph select the streamed plots.
         """
         await ws.accept()
         state: dict[str, Any] = {"sim": None, "probes": [], "rate": 8.0, "pending": [], "reset": False}
@@ -166,13 +166,11 @@ def create_app() -> FastAPI:
                     except Exception as exc:
                         await ws.send_json({"type": "error", "error": str(exc)})
                         continue
-                    state.update(sim=sim, probes=editor.get("probes") or [], rate=float(msg.get("rate", 8.0)),
+                    state.update(sim=sim, probes=scope_probes(editor), rate=float(msg.get("rate", 8.0)),
                                  pending=[])
                     await ws.send_json({"type": "started"})
                 elif kind == "set_param":
                     state["pending"].append((msg["path"], msg["value"]))
-                elif kind == "probes":
-                    state["probes"] = msg.get("probes") or []
                 elif kind == "rate":
                     state["rate"] = float(msg.get("rate", 8.0))
                 elif kind == "reset":
@@ -195,7 +193,8 @@ def create_app() -> FastAPI:
             t0 = time.perf_counter()
             values = sim.step()
             return {"type": "frame", "batch": sim._batch_index, "metrics": sim.graph.metrics(),
-                    "probes": compute_probes(values, probes), "errors": errors,
+                    "probes": compute_probes(values, probes), "displays": block_displays(sim.graph, values),
+                    "errors": errors,
                     "step_ms": round(1000 * (time.perf_counter() - t0), 1)}
 
         recv_task = asyncio.create_task(receiver())

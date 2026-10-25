@@ -126,7 +126,7 @@ def gaussian_launch_weights(n_groups: int, waist_um: float, offset_um: float, fu
 
 
 # ----------------------------------------------------------- multimode fiber
-@register_block("multimode_fiber", category="optical")
+@register_block("multimode_fiber", category="medium", subcategory="Fiber", label="Multimode Fiber")
 class MultimodeFiber(Block):
     """Graded-index multimode fiber (OM1-OM5) for short-reach IM/DD links.
 

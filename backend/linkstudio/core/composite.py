@@ -34,6 +34,7 @@ class Subsystem(Block):
 
     type_name = "subsystem"
     category = "core"
+    label = "Subsystem"
     is_composite = True
 
     def __init__(self, graph: Graph, inputs: Mapping[str, str] | None = None,

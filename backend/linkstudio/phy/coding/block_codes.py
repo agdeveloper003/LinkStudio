@@ -14,7 +14,7 @@ def _scale_rate(x: Signal, n_in: int, n_out: int) -> float:
 
 
 # ----------------------------------------------------------------- repetition
-@register_block("repetition_encoder", category="coding")
+@register_block("repetition_encoder", category="encoder", subcategory="Block Codes", label="Repetition Encoder")
 class RepetitionEncoder(Block):
     """Repeat every bit ``n`` times (rate 1/n)."""
 
@@ -30,7 +30,7 @@ class RepetitionEncoder(Block):
         return {"out": x.evolve(out, code_rate=_scale_rate(x, x.length, out.shape[-1]))}
 
 
-@register_block("repetition_decoder", category="coding")
+@register_block("repetition_decoder", category="decoder", subcategory="Block Codes", label="Repetition Decoder")
 class RepetitionDecoder(Block):
     """Soft (LLR sum) or hard (majority vote) repetition decoding."""
 
@@ -90,7 +90,7 @@ class _HammingParams(BlockParams):
     m: int = Field(3, ge=2, le=10, description="Parity bits; code is (2^m-1, 2^m-1-m).")
 
 
-@register_block("hamming_encoder", category="coding")
+@register_block("hamming_encoder", category="encoder", subcategory="Block Codes", label="Hamming Encoder")
 class HammingEncoder(Block):
     """Systematic Hamming encoder (frame length must be a multiple of k)."""
 
@@ -109,7 +109,7 @@ class HammingEncoder(Block):
         return {"out": x.evolve(out, code_rate=_scale_rate(x, x.length, out.shape[-1]))}
 
 
-@register_block("hamming_decoder", category="coding")
+@register_block("hamming_decoder", category="decoder", subcategory="Block Codes", label="Hamming Decoder")
 class HammingDecoder(Block):
     """Syndrome decoding (hard decision; LLR inputs are sliced first)."""
 

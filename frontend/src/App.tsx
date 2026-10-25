@@ -9,11 +9,12 @@ import {
   applyNodeChanges,
   useReactFlow,
   type Connection,
+  type FinalConnectionState,
   type Edge,
   type EdgeChange,
   type NodeChange,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { api, downloadText, type Catalogue, type PortPlace, type Probe, type ScenarioItem, type Validation } from "./api";
 import { BlockNode } from "./components/BlockNode";
 import { Inspector } from "./components/Inspector";
@@ -23,7 +24,7 @@ import { ObstacleContext, RoutedEdge } from "./components/RoutedEdge";
 import { ScenarioBrowser } from "./components/ScenarioBrowser";
 import { SimulatePanel } from "./components/SimulatePanel";
 import { SweepPanel } from "./components/SweepPanel";
-import { CatalogueContext, PortMoveContext } from "./context";
+import { BlockActionsContext, CatalogueContext, EMPTY_RUN, PortMoveContext, RunDataContext, type RunData } from "./context";
 import {
   applyValidation,
   defaultParams,
@@ -35,7 +36,8 @@ import {
   uniqueName,
   type BlockNodeType,
 } from "./graph";
-import { nodeRect, snapPosition, straighten, type Guide } from "./snap";
+import { nodeRect, snapPosition, spread, straighten, type Guide } from "./snap";
+import { isScopeType } from "./geometry";
 import { kindColor, kindsCompatible } from "./theme";
 import { useLive } from "./useLive";
 
@@ -62,6 +64,25 @@ interface Snapshot {
 
 const EMPTY_META: Meta = { name: "untitled", description: "", category: "", path: "", seed: 1, batch_size: 32 };
 
+/** Side panels: visibility and width, remembered in the browser. */
+interface PanelLayout {
+  left: boolean;
+  right: boolean;
+  leftWidth: number;
+  rightWidth: number;
+}
+
+const DEFAULT_PANELS: PanelLayout = { left: true, right: true, leftWidth: 230, rightWidth: 320 };
+const PANELS_KEY = "linkstudio.panels";
+
+function loadPanels(): PanelLayout {
+  try {
+    return { ...DEFAULT_PANELS, ...JSON.parse(window.localStorage.getItem(PANELS_KEY) ?? "{}") };
+  } catch {
+    return DEFAULT_PANELS;
+  }
+}
+
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
@@ -77,7 +98,8 @@ export default function App() {
   const [validation, setValidation] = useState<Validation | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("live");
-  const [bottomHeight, setBottomHeight] = useState(340);
+  const [panels, setPanels] = useState<PanelLayout>(loadPanels);
+  const [runData, setRunData] = useState<RunData>(EMPTY_RUN);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -93,7 +115,8 @@ export default function App() {
   });
   const flow = useReactFlow();
   const live = useLive();
-  const dragging = useRef(false);
+  const resizing = useRef<"left" | "right" | null>(null);
+  const pendingTap = useRef<{ scope: string; edge: Edge } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const clipboard = useRef<Snapshot | null>(null);
   const undoStack = useRef<Snapshot[]>([]);
@@ -190,7 +213,10 @@ export default function App() {
   }, [structureKey, catalogue]);
 
   // ------------------------------------------------------------- history
-  const positionsKey = useMemo(() => nodes.map((n) => `${n.id}:${Math.round(n.position.x)},${Math.round(n.position.y)}`).join("|"), [nodes]);
+  const positionsKey = useMemo(
+    () => nodes.map((n) => `${n.id}:${Math.round(n.position.x)},${Math.round(n.position.y)},${n.data.size ? `${Math.round(n.data.size.w)}x${Math.round(n.data.size.h)}` : ""}`).join("|"),
+    [nodes],
+  );
   const probesKey = useMemo(() => JSON.stringify(probes), [probes]);
 
   useEffect(() => {
@@ -315,6 +341,84 @@ export default function App() {
     ]);
   }, []);
 
+  const setParam = useCallback(
+    (node: string, param: string, value: unknown) => {
+      setNodes((nds) => nds.map((n) => (n.id === node ? { ...n, data: { ...n.data, params: { ...n.data.params, [param]: value } } } : n)));
+      if (live.running) live.setParam(`${node}.${param}`, value);
+    },
+    [live],
+  );
+
+  // ------------------------------------------------------------ scope taps
+  /**
+   * The link under a screen point, ignoring links into scopes. Several links can be under
+   * the pointer (their click zones are wider than the lines, or they overlap): the nearest
+   * one carrying a signal of the ``accepted`` kinds wins, else the nearest one.
+   */
+  const edgeAt = useCallback((x: number, y: number, accepted = "ANY"): Edge | undefined => {
+    let best: { edge: Edge; d: number } | undefined;
+    for (const el of document.elementsFromPoint(x, y)) {
+      const g = el.closest(".react-flow__edge") as SVGGElement | null;
+      const edge = g?.dataset.id ? edgesRef.current.find((e) => e.id === g.dataset.id) : undefined;
+      const target = edge && nodesRef.current.find((n) => n.id === edge.target);
+      if (!edge || !target || isScopeType(target.data.type)) continue;
+      const path = g!.querySelector<SVGPathElement>("path.react-flow__edge-path");
+      const ctm = path?.getScreenCTM();
+      if (!path || !ctm) continue;
+      let d = Infinity;
+      const length = path.getTotalLength();
+      for (let s = 0; s <= length; s += 3) {
+        const p = new DOMPoint(path.getPointAtLength(s).x, path.getPointAtLength(s).y).matrixTransform(ctm);
+        d = Math.min(d, Math.hypot(p.x - x, p.y - y));
+      }
+      if (!kindsCompatible(outputKinds(edge.source, edge.sourceHandle ?? ""), accepted)) d += 1000;
+      if (!best || d < best.d) best = { edge, d };
+    }
+    return best?.edge;
+  }, [outputKinds]);
+
+  /**
+   * Connect a scope input to the output feeding ``edge``: the scope taps that link.
+   * Without ``port``, the first free input is used. The screen switches to the new signal.
+   */
+  const tapLink = useCallback(
+    (scope: string, edge: Edge, port?: string) => {
+      const node = nodesRef.current.find((n) => n.id === scope);
+      if (!node) return;
+      const used = new Set(edgesRef.current.filter((e) => e.target === scope).map((e) => e.targetHandle));
+      const input = port ?? node.data.inputs.find((i) => !used.has(i.name))?.name;
+      if (!input) {
+        notify("All the scope inputs are in use: drag one of them onto the link instead.", true);
+        return;
+      }
+      const accepted = node.data.inputs.find((i) => i.name === input)?.kinds ?? "ANY";
+      const kinds = outputKinds(edge.source, edge.sourceHandle ?? "");
+      if (!kindsCompatible(kinds, accepted)) {
+        notify(`This scope shows ${accepted} signals; the link carries ${kinds}.`, true);
+        return;
+      }
+      const sourceHandle = edge.sourceHandle ?? "";
+      const others = edgesRef.current.filter((e) => !(e.target === scope && e.targetHandle === input));
+      setEdges([...others, { id: edgeId(edge.source, sourceHandle, scope, input), source: edge.source, sourceHandle, target: scope, targetHandle: input }]);
+      setParam(scope, "channel", node.data.inputs.findIndex((i) => i.name === input) + 1);
+    },
+    [outputKinds, notify, setParam],
+  );
+
+  /** Dragging from a scope input and releasing on a link connects the scope to that link. */
+  const onConnectEnd = useCallback(
+    (e: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      if (state.isValid || !state.fromHandle || state.fromHandle.type !== "target") return;
+      const scope = state.fromHandle.nodeId;
+      if (!isScopeType(nodesRef.current.find((n) => n.id === scope)?.data.type ?? "")) return;
+      const pt = "changedTouches" in e ? e.changedTouches[0] : e;
+      const accepted = nodesRef.current.find((n) => n.id === scope)?.data.inputs.find((i) => i.name === state.fromHandle!.id)?.kinds;
+      const edge = edgeAt(pt.clientX, pt.clientY, accepted);
+      if (edge) tapLink(scope, edge, state.fromHandle.id ?? undefined);
+    },
+    [edgeAt, tapLink],
+  );
+
   const addBlock = useCallback(
     (type: string, position?: { x: number; y: number }) => {
       if (!catalogue) return;
@@ -349,18 +453,23 @@ export default function App() {
     (e: DragEvent) => {
       e.preventDefault();
       const type = e.dataTransfer.getData(DRAG_MIME);
-      if (type) addBlock(type, flow.screenToFlowPosition({ x: e.clientX - 90, y: e.clientY - 20 }));
+      if (!type) return;
+      // A scope dropped on a link is connected to it, and placed below the drop point.
+      const accepted = Object.values(catalogue?.blocks[type]?.inputs ?? {})[0]?.kinds;
+      const edge = isScopeType(type) ? edgeAt(e.clientX, e.clientY, accepted) : undefined;
+      const name = uniqueName(type, new Set(nodesRef.current.map((n) => n.id)));
+      const offset = edge ? { x: -40, y: 40 } : { x: -90, y: -20 };
+      addBlock(type, flow.screenToFlowPosition({ x: e.clientX + offset.x, y: e.clientY + offset.y }));
+      if (edge) pendingTap.current = { scope: name, edge };
     },
-    [addBlock, flow],
+    [addBlock, flow, edgeAt, catalogue],
   );
 
-  const setParam = useCallback(
-    (node: string, param: string, value: unknown) => {
-      setNodes((nds) => nds.map((n) => (n.id === node ? { ...n, data: { ...n.data, params: { ...n.data.params, [param]: value } } } : n)));
-      if (live.running) live.setParam(`${node}.${param}`, value);
-    },
-    [live],
-  );
+  const resizeBlock = useCallback((node: string, size: { w: number; h: number }) => {
+    setNodes((nds) => nds.map((n) => (n.id === node ? { ...n, data: { ...n.data, size } } : n)));
+  }, []);
+  const runValue = useMemo(() => ({ ...runData, running: live.running }), [runData, live.running]);
+  const blockActions = useMemo(() => ({ setParam, resize: resizeBlock }), [setParam, resizeBlock]);
 
   const renameBlock = useCallback(
     (oldName: string, newName: string): string | null => {
@@ -391,15 +500,9 @@ export default function App() {
           return probed.join() === n.data.probed.join() ? n : { ...n, data: { ...n.data, probed } };
         }),
       );
-      if (live.running) live.setProbes(next);
     },
-    [live],
+    [],
   );
-
-  const toggleProbe = (key: string) =>
-    updateProbes(probes.some((p) => p.key === key) ? probes.filter((p) => p.key !== key) : [...probes, { key }]);
-  const setProbeView = (key: string, view: string) => updateProbes(probes.map((p) => (p.key === key ? { ...p, view } : p)));
-  const removeProbe = (key: string) => updateProbes(probes.filter((p) => p.key !== key));
 
   const deleteBlock = (name: string) => {
     setNodes((nds) => nds.filter((n) => n.id !== name));
@@ -486,7 +589,7 @@ export default function App() {
     if (!nodes.length) return;
     try {
       const { positions } = await api.layout(getGraph());
-      setNodes((nds) => straighten(nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n)), edges));
+      setNodes((nds) => spread(straighten(nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n)), edges)));
       window.setTimeout(() => flow.fitView({ padding: 0.15, duration: 300 }), 50);
     } catch (err) {
       notify(`Layout failed: ${err instanceof Error ? err.message : err}`, true);
@@ -556,18 +659,58 @@ export default function App() {
       } else if (key === "l") {
         e.preventDefault();
         void autoLayout();
+      } else if (key === "b") {
+        e.preventDefault();
+        togglePanel("left");
+      } else if (key === "i") {
+        e.preventDefault();
+        togglePanel("right");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // ------------------------------------------------------- bottom resize
+  // A scope dropped on a link is connected once its node exists.
+  useEffect(() => {
+    const p = pendingTap.current;
+    if (p && nodes.some((n) => n.id === p.scope)) {
+      pendingTap.current = null;
+      tapLink(p.scope, p.edge);
+    }
+  }, [nodes, tapLink]);
+
+  // ---------------------------------------------------------- scope data
+  useEffect(() => {
+    const f = live.frame;
+    if (f) setRunData({ probes: f.probes ?? {}, metrics: f.metrics ?? {}, displays: f.displays ?? {}, running: true });
+  }, [live.frame]);
+  const onSimulationResult = useCallback(
+    (probes: RunData["probes"], metrics: RunData["metrics"]) => setRunData({ probes, metrics, displays: {}, running: false }),
+    [],
+  );
+
+  // --------------------------------------------------- side panel layout
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PANELS_KEY, JSON.stringify(panels));
+    } catch {
+      /* private mode: not remembered */
+    }
+  }, [panels]);
+
   useEffect(() => {
     const move = (e: MouseEvent) => {
-      if (dragging.current) setBottomHeight(Math.min(Math.max(window.innerHeight - e.clientY, 140), window.innerHeight - 200));
+      if (resizing.current === "left") {
+        setPanels((p) => ({ ...p, leftWidth: Math.min(Math.max(e.clientX, 160), window.innerWidth / 2) }));
+      } else if (resizing.current === "right") {
+        setPanels((p) => ({ ...p, rightWidth: Math.min(Math.max(window.innerWidth - e.clientX, 240), 720) }));
+      }
     };
-    const up = () => (dragging.current = false);
+    const up = () => {
+      resizing.current = null;
+      document.body.classList.remove("col-resizing");
+    };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
     return () => {
@@ -576,13 +719,22 @@ export default function App() {
     };
   }, []);
 
+  const startResize = (side: "left" | "right") => (e: ReactMouseEvent) => {
+    e.preventDefault();
+    resizing.current = side;
+    document.body.classList.add("col-resizing");
+  };
+  const togglePanel = (side: "left" | "right") => setPanels((p) => ({ ...p, [side]: !p[side] }));
+
+  const scopeNames = useMemo(() => new Set(nodes.filter((n) => isScopeType(n.data.type)).map((n) => n.id)), [nodes]);
   const styledEdges = useMemo(
     () =>
       edges.map((e) => {
         const color = kindColor(outputKinds(e.source, e.sourceHandle ?? ""));
-        return { ...e, type: "routed", style: { stroke: color, strokeWidth: e.selected ? 3 : 2 }, animated: live.running };
+        const tap = scopeNames.has(e.target);
+        return { ...e, type: "routed", data: { tap }, style: { stroke: color, strokeWidth: e.selected ? 3 : 2 }, animated: live.running && !tap };
       }),
-    [edges, outputKinds, live.running],
+    [edges, outputKinds, live.running, scopeNames],
   );
 
   const resources = {
@@ -616,11 +768,13 @@ export default function App() {
     <CatalogueContext.Provider value={catalogue}>
     <PortMoveContext.Provider value={movePort}>
     <ObstacleContext.Provider value={obstacles}>
-      <div className="app" style={{ gridTemplateRows: `48px 1fr ${bottomHeight}px` }}>
+    <RunDataContext.Provider value={runValue}>
+    <BlockActionsContext.Provider value={blockActions}>
+      <div className="app">
         <header className="topbar">
           <div className="brand">
             <svg viewBox="0 0 32 32" width="22" height="22"><path d="M2 16 Q 6 4 10 16 T 18 16 T 26 16 T 30 16" fill="none" stroke="#6ea8fe" strokeWidth="3" /></svg>
-            LinkStudio
+            <span className="brand-name">LinkStudio</span>
           </div>
           <button className="scenario-button" onClick={() => setBrowserOpen(true)} title="Open a scenario (Ctrl+O)">
             <span className="scenario-name">{meta.name || "untitled"}</span>
@@ -636,22 +790,50 @@ export default function App() {
             <button onClick={redo} disabled={!historySize.redo} title="Redo (Ctrl+Y)">↷</button>
             <button onClick={autoLayout} title="Arrange blocks automatically (Ctrl+L)">Layout</button>
             <button onClick={exportPython} title="Download a Python script that rebuilds and runs this scenario">Export .py</button>
+            <span className="sep" />
+            <button className={`icon-toggle${panels.left ? " active" : ""}`} onClick={() => togglePanel("left")} title="Show / hide the blocks panel (Ctrl+B)">
+              <PanelIcon side="left" />
+            </button>
+            <button className={`icon-toggle${panels.right ? " active" : ""}`} onClick={() => togglePanel("right")} title="Show / hide the inspector (Ctrl+I)">
+              <PanelIcon side="right" />
+            </button>
           </div>
           <div className="spacer" />
           <label className="inline">
             seed
             <input type="number" value={meta.seed} onChange={(e) => setMeta({ ...meta, seed: Number(e.target.value) })} />
           </label>
-          <span
-            className={`status-chip ${validation ? (validation.ok ? "ok" : "bad") : ""}`}
-            title={validation?.errors.join("\n") || "Graph validation"}
-          >
-            {!validation ? "not validated" : validation.ok ? "✓ valid" : `✗ ${validation.errors.length} error`}
-          </span>
+          <div className="mode-switch">
+            {(["live", "simulate", "sweep"] as Mode[]).map((m) => (
+              <button key={m} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>
+                {m === "live" ? "Live" : m === "simulate" ? "Simulate" : "Sweep"}
+                {m === "live" && live.running && <span className="live-dot" />}
+              </button>
+            ))}
+          </div>
+          <div className="run-bar">
+            <LivePanel live={live} onStart={() => live.start(getGraph())} blocked={blocked} active={mode === "live"} />
+            <SimulatePanel getGraph={getGraph} blocked={blocked} resources={resources} active={mode === "simulate"} onResult={onSimulationResult} />
+            <SweepPanel getGraph={getGraph} numericParams={sweepParams} theory={catalogue.theory} scenarioName={meta.name} blocked={blocked} resources={resources} active={mode === "sweep"} />
+          </div>
         </header>
 
-        <div className="main">
-          <Palette catalogue={catalogue} onAdd={(t) => addBlock(t)} />
+        <div
+          className="main"
+          style={{
+            gridTemplateColumns: [
+              panels.left ? `min(${panels.leftWidth}px, 50vw) 0px` : "",
+              "minmax(0, 1fr)",
+              panels.right ? `0px ${panels.rightWidth}px` : "",
+            ].join(" "),
+          }}
+        >
+          {panels.left && (
+            <>
+              <Palette catalogue={catalogue} onAdd={(t) => addBlock(t)} onClose={() => togglePanel("left")} />
+              <div className="col-resizer" onMouseDown={startResize("left")} title="Drag to resize" />
+            </>
+          )}
           <div className="canvas" ref={canvasRef} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
             <ReactFlow<BlockNodeType>
               nodes={nodes}
@@ -661,6 +843,7 @@ export default function App() {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onConnectEnd={onConnectEnd}
               isValidConnection={isValidConnection}
               onNodeClick={(_, n) => setSelected(n.id)}
               onPaneClick={() => setSelected(null)}
@@ -692,43 +875,27 @@ export default function App() {
               </div>
             )}
           </div>
-          <Inspector
+          {panels.right && (
+            <>
+              <div className="col-resizer" onMouseDown={startResize("right")} title="Drag to resize" />
+              <Inspector
             catalogue={catalogue}
             node={selectedNode}
-            probes={probes}
             validation={validation}
             scenario={{ name: meta.name, description: meta.description, category: meta.category, categories, blocks: nodes.length, edges: edges.length }}
             onParam={setParam}
             onRename={renameBlock}
-            onToggleProbe={toggleProbe}
             onDelete={deleteBlock}
             onDuplicate={(id) => duplicate([id])}
             onScenarioChange={(p) => setMeta({ ...meta, ...p })}
+            onClose={() => togglePanel("right")}
             getGraph={getGraph}
             structureKey={structureKey}
-          />
+              />
+            </>
+          )}
         </div>
 
-        <section className="dock">
-          <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); dragging.current = true; }} />
-          <div className="tabs">
-            {(["live", "simulate", "sweep"] as Mode[]).map((m) => (
-              <button key={m} className={`tab${mode === m ? " active" : ""}`} onClick={() => setMode(m)}>
-                {m === "live" ? "Live" : m === "simulate" ? "Simulate" : "Sweep"}
-                {m === "live" && live.running && <span className="live-dot" />}
-              </button>
-            ))}
-          </div>
-          <div className={`tab-body${mode === "live" ? "" : " hidden"}`}>
-            <LivePanel live={live} probes={probes} onStart={() => live.start(getGraph())} onView={setProbeView} onRemoveProbe={removeProbe} blocked={blocked} />
-          </div>
-          <div className={`tab-body${mode === "simulate" ? "" : " hidden"}`}>
-            <SimulatePanel getGraph={getGraph} probes={probes} onView={setProbeView} onRemoveProbe={removeProbe} blocked={blocked} resources={resources} />
-          </div>
-          <div className={`tab-body${mode === "sweep" ? "" : " hidden"}`}>
-            <SweepPanel getGraph={getGraph} numericParams={sweepParams} theory={catalogue.theory} scenarioName={meta.name} blocked={blocked} resources={resources} />
-          </div>
-        </section>
         {browserOpen && (
           <ScenarioBrowser
             scenarios={scenarios}
@@ -740,8 +907,19 @@ export default function App() {
         )}
         {toast && <div className={`toast${toast.error ? " error" : ""}`}>{toast.text}</div>}
       </div>
+    </BlockActionsContext.Provider>
+    </RunDataContext.Provider>
     </ObstacleContext.Provider>
     </PortMoveContext.Provider>
     </CatalogueContext.Provider>
+  );
+}
+
+function PanelIcon({ side }: { side: "left" | "right" }) {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <rect x={side === "left" ? 1.5 : 10} y="2.5" width="4.5" height="11" fill="currentColor" stroke="none" opacity="0.6" />
+    </svg>
   );
 }

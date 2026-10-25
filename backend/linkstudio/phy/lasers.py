@@ -372,7 +372,7 @@ class _RateParams(BlockParams):
     linewidth_hz: float = Field(0.0, ge=0, description="Lorentzian linewidth (Wiener phase noise).")
 
 
-@register_block("dml", category="optical")
+@register_block("dml", category="modulator", subcategory="Lasers", label="Directly Modulated Laser")
 class DirectlyModulatedLaser(_LaserBlock):
     """Directly modulated single-mode laser (DFB) solved from its rate equations.
 
@@ -396,7 +396,7 @@ class DirectlyModulatedLaser(_LaserBlock):
                              p.linewidth_enhancement, p.optical_efficiency, p.wavelength_nm)
 
 
-@register_block("vcsel", category="optical")
+@register_block("vcsel", category="modulator", subcategory="Lasers", label="VCSEL")
 class VCSEL(_LaserBlock):
     """Directly modulated VCSEL with spatial hole burning and self-heating (Shi et al. 2009).
 
@@ -433,8 +433,7 @@ class VCSEL(_LaserBlock):
         ambient_c: float = Field(25.0, description="Ambient temperature T0.")
         thermal: bool = Field(True, description="Self-heating and thermal leakage (Tucker's model).")
         thermal_resistance_k_mw: float = Field(3.0, ge=0, description="R_th.")
-        leakage_coefficients: list[float] = Field([0.0, 0.0, 0.0, 2e-9],
-                                                  description="a_i of I_l = sum a_i T^(i-1) (A, T in C).")
+        leakage_coefficients: list[float] = Field([0.0, 0.0, 0.0, 2e-9], description="a_i of I_l = sum a_i T^(i-1) (A, T in C).")
         diode_ideality: float = Field(2.0, gt=0, description="n of the diode V-I characteristic.")
         saturation_current_a: float = Field(1e-15, gt=0, description="I_ss0, reverse saturation current at 0 C.")
         saturation_b1: float = Field(0.02, description="b1 of I_ss(T) = b1 I_ss0 (T - b2) (1/C).")

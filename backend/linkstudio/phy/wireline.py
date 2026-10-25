@@ -27,7 +27,7 @@ _FOUR_B_FIVE_B = ["11110", "01001", "10100", "10101", "01010", "01011", "01110",
 FOUR_B_FIVE_B = np.array([[int(c) for c in w] for w in _FOUR_B_FIVE_B], dtype=np.uint8)  # (16, 5)
 
 
-@register_block("line_encoder", category="wireline")
+@register_block("line_encoder", category="mapper", subcategory="Line Codes", label="Line Code Mapper (NRZ, AMI, MLT-3)")
 class LineEncoder(Block):
     """Baseband line code: bits -> real symbols.
 
@@ -64,7 +64,7 @@ class LineEncoder(Block):
         return {"out": Signal(s, Kind.SYMBOLS, fs=self.params.symbol_rate, meta=meta)}
 
 
-@register_block("line_decoder", category="wireline")
+@register_block("line_decoder", category="demapper", subcategory="Line Codes", label="Line Code Demapper (NRZ, AMI, MLT-3)")
 class LineDecoder(Block):
     """Hard decisions for NRZ / Manchester / AMI / MLT-3 symbols (the real part is used)."""
 
@@ -110,7 +110,7 @@ def _self_sync_descramble(s: np.ndarray) -> np.ndarray:
     return padded[..., 58:] ^ padded[..., 19:19 + n] ^ padded[..., :n]
 
 
-@register_block("line_block_encoder", category="wireline")
+@register_block("line_block_encoder", category="encoder", subcategory="Line Block Codes", label="Line Block Encoder (4B/5B, 64B/66B)")
 class LineBlockEncoder(Block):
     """4B/5B (FDDI, 100BASE-TX) or 64B/66B (10G/100G Ethernet) block line code.
 
@@ -141,7 +141,7 @@ class LineBlockEncoder(Block):
         return {"out": x.evolve(out, code_rate=x.meta.get("code_rate", 1.0) * x.length / out.shape[-1])}
 
 
-@register_block("line_block_decoder", category="wireline")
+@register_block("line_block_decoder", category="decoder", subcategory="Line Block Codes", label="Line Block Decoder (4B/5B, 64B/66B)")
 class LineBlockDecoder(Block):
     """Inverse of ``line_block_encoder``; counts invalid code words / sync headers."""
 
@@ -311,7 +311,7 @@ def _require_fs(x: Signal, what: str) -> float:
     return x.fs
 
 
-@register_block("copper_line", category="wireline")
+@register_block("copper_line", category="medium", subcategory="Copper", label="Copper Line")
 class CopperLine(Block):
     """Cable channel with frequency-dependent loss (twisted pair, coax, PCB trace).
 
@@ -362,7 +362,7 @@ def crosstalk_psd_gain(f: np.ndarray, model: str, n: int, length_m: float, line:
     return 7.744e-21 * n ** 0.6 * length_ft * fa ** 2 * line_gain
 
 
-@register_block("crosstalk", category="wireline")
+@register_block("crosstalk", category="medium", subcategory="Copper", label="Crosstalk (NEXT, FEXT)")
 class Crosstalk(Block):
     """Near-end (NEXT) or far-end (FEXT) crosstalk from ``n_disturbers`` similar pairs.
 
@@ -404,7 +404,7 @@ class Crosstalk(Block):
         return {"crosstalk_to_signal_db": 10 * float(np.log10(np.mean(self._ratio)))} if self._ratio else {}
 
 
-@register_block("impulse_noise", category="wireline")
+@register_block("impulse_noise", category="medium", subcategory="Copper", label="Impulse Noise")
 class ImpulseNoise(Block):
     """Bursts of strong Gaussian noise (electrical switching, appliances)."""
 
@@ -429,7 +429,7 @@ class ImpulseNoise(Block):
 
 
 # ------------------------------------------------------------- full duplex echo
-@register_block("hybrid_echo", category="wireline")
+@register_block("hybrid_echo", category="medium", subcategory="Copper", label="Hybrid Echo")
 class HybridEcho(Block):
     """Leakage of the local transmitter into the receiver through the hybrid (full duplex)."""
 
@@ -448,7 +448,7 @@ class HybridEcho(Block):
         return {"out": x.evolve(x.data + echo)}
 
 
-@register_block("echo_canceller", category="wireline")
+@register_block("echo_canceller", category="equalizer", subcategory="Echo Cancellation", label="Echo Canceller")
 class EchoCanceller(Block):
     """NLMS adaptive filter estimating the echo from the local ``tx`` signal and subtracting it.
 
@@ -494,7 +494,7 @@ class EchoCanceller(Block):
 
 
 # ------------------------------------------------------------ SerDes receiver
-@register_block("ctle", category="wireline")
+@register_block("ctle", category="equalizer", subcategory="Analog", label="CTLE")
 class CTLE(Block):
     """Continuous-time linear equalizer: H(s) = A (1 + s/wz) / ((1 + s/wp1)(1 + s/wp2)).
 
@@ -525,7 +525,7 @@ class CTLE(Block):
         return {"out": x.evolve(y, noise_var=None, power=None)}
 
 
-@register_block("dfe_equalizer", category="wireline")
+@register_block("dfe_equalizer", category="equalizer", subcategory="Adaptive", label="Decision-Feedback Equalizer")
 class DFEEqualizer(Block):
     """Adaptive feed-forward + decision-feedback equalizer (NLMS), symbol spaced.
 
@@ -581,7 +581,7 @@ class DFEEqualizer(Block):
         return {"out": x.evolve(out, noise_var=err / count if count else x.meta.get("noise_var"))}
 
 
-@register_block("jitter", category="wireline")
+@register_block("jitter", category="impairment", subcategory="Timing", label="Clock Jitter")
 class Jitter(Block):
     """Sampling-clock jitter: random (RJ, per symbol) and sinusoidal (SJ), in unit intervals."""
 
@@ -623,7 +623,7 @@ def _tone_constellation(bits: int) -> Constellation:
     return psk(2) if bits == 1 else qam(1 << bits)
 
 
-@register_block("dmt_modulator", category="wireline")
+@register_block("dmt_modulator", category="modulator", subcategory="Multicarrier", label="DMT Modulator")
 class DMTModulator(Block):
     """Discrete multitone (ADSL/VDSL): real IFFT with Hermitian symmetry, per-tone bit loading.
 
@@ -700,7 +700,7 @@ class DMTModulator(Block):
                 "data_rate_mbps": self.bits_per_symbol * p.sample_rate / (p.n_fft + p.cp_len) / 1e6}
 
 
-@register_block("dmt_demodulator", category="wireline")
+@register_block("dmt_demodulator", category="demodulator", subcategory="Multicarrier", label="DMT Demodulator")
 class DMTDemodulator(Block):
     """Remove the cyclic prefix, FFT, one-tap frequency-domain equalization and per-tone demapping.
 

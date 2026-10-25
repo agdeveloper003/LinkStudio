@@ -9,7 +9,7 @@ import type { PortPlace, Side } from "./api";
 import type { BlockData } from "./graph";
 
 export const NODE_WIDTH = 184;
-export const HEADER = 52; // name, type and parameter summary
+export const HEADER = 36; // instance name and block type
 export const ROW = 22; // vertical pitch of side ports
 const BOTTOM_PAD = 6;
 const TOP_PITCH = 64; // horizontal pitch of top/bottom ports
@@ -28,9 +28,66 @@ export interface Rect {
 
 export const portKey = (dir: "in" | "out", name: string) => `${dir}:${name}`;
 
+/** Scope blocks (``scope_*`` types) show their plot inside the block. */
+export const isScopeType = (type: string) => type.startsWith("scope_");
+
+/** Default size of a block drawn with a display of its own; resizable ones keep the user's size. */
+export interface BodySpec {
+  w: number;
+  h: number;
+  resizable?: boolean;
+  minW?: number;
+  minH?: number;
+  /**
+   * Drawn without the block frame and header (the link media: fibers, wireless channel).
+   * ``ports`` is the vertical band [top, bottom] holding the side ports, in node pixels.
+   */
+  frameless?: { ports: [number, number] };
+  /** Default places of some ports ("in:in" on the bottom side...); the user can still move them. */
+  ports?: Record<string, PortPlace>;
+}
+
+/** Size of a block node; ``top`` / ``bottom`` bound the band of the side ports. */
+export interface BlockSize {
+  w: number;
+  h: number;
+  top?: number;
+  bottom?: number;
+}
+
+const SOUTH = (offset = 0.5): PortPlace => ({ side: "bottom", offset });
+
+const BODIES: Record<string, BodySpec> = {
+  random_bits: { w: 240, h: HEADER + 104 },
+  prbs: { w: 240, h: HEADER + 84 },
+  dml: { w: 176, h: 64, frameless: { ports: [40, 40] } },
+  vcsel: { w: 180, h: 80, frameless: { ports: [40, 40] } },
+  photodiode: { w: 160, h: 70, frameless: { ports: [40, 40] } },
+  optical_amplifier: { w: 140, h: 72, frameless: { ports: [40, 40] } },
+  optical_attenuator: { w: 120, h: 84, frameless: { ports: [40, 40] } },
+  gain: { w: 112, h: 60, frameless: { ports: [32, 32] } },
+  agc: { w: 124, h: 80, frameless: { ports: [40, 40] } },
+  optical_power_meter: { w: 128, h: 158, frameless: { ports: [79, 79] }, ports: { "in:in": SOUTH() } },
+  ber_meter: { w: 200, h: HEADER + 86 },
+  mapper: { w: 180, h: HEADER + 156, resizable: true, minW: 150, minH: HEADER + 110 },
+  mimo_channel: { w: 200, h: 104, frameless: { ports: [42, 82] } },
+  fiber: { w: 150, h: 46, frameless: { ports: [38, 38] } },
+  multimode_fiber: { w: 150, h: 46, frameless: { ports: [38, 38] } },
+  optical_link: { w: 220, h: 42, frameless: { ports: [30, 30] } },
+};
+/** Scope inputs enter from the bottom, the first one in the middle and the others around it. */
+const SCOPE_BODY: BodySpec = {
+  w: 320, h: HEADER + 220, resizable: true, minW: 220, minH: HEADER + 150,
+  ports: { "in:in1": SOUTH(0.5), "in:in2": SOUTH(0.3), "in:in3": SOUTH(0.7), "in:in4": SOUTH(0.1) },
+};
+
+export function bodySpec(type: string): BodySpec | undefined {
+  return isScopeType(type) ? SCOPE_BODY : BODIES[type];
+}
+
 /** Every port with its place: stored overrides, defaults for the others. */
 export function portPlaces(data: BlockData): Record<string, PortPlace> {
-  const stored = data.ports ?? {};
+  const stored = { ...bodySpec(data.type)?.ports, ...data.ports };
   const keys = [...data.inputs.map((p) => portKey("in", p.name)), ...data.outputs.map((p) => portKey("out", p.name))];
   const out: Record<string, PortPlace> = {};
   // Default: inputs down the left side, outputs down the right side, one row each.
@@ -58,21 +115,35 @@ export function portPlaces(data: BlockData): Record<string, PortPlace> {
 }
 
 /** Width and height of a block node. */
-export function blockSize(data: BlockData, places = portPlaces(data)): { w: number; h: number } {
+export function blockSize(data: BlockData, places = portPlaces(data)): BlockSize {
   const count = (side: Side) => Object.values(places).filter((p) => p.side === side).length;
   const rows = Math.max(count("left"), count("right"), 1);
   const cols = Math.max(count("top"), count("bottom"));
-  return { w: Math.max(NODE_WIDTH, (cols + 1) * TOP_PITCH), h: HEADER + rows * ROW + BOTTOM_PAD };
+  const minH = HEADER + rows * ROW + BOTTOM_PAD;
+  const body = bodySpec(data.type);
+  if (body?.frameless) {
+    const [top, bottom] = body.frameless.ports;
+    return { w: body.w, h: body.h, top, bottom: body.h - bottom };
+  }
+  if (body) {
+    const user = body.resizable ? data.size : undefined;
+    return {
+      w: Math.max(user ? Math.max(user.w, body.minW ?? 0) : body.w, body.ports ? 0 : (cols + 1) * TOP_PITCH),
+      h: Math.max(user ? Math.max(user.h, body.minH ?? 0) : body.h, minH),
+    };
+  }
+  return { w: Math.max(NODE_WIDTH, (cols + 1) * TOP_PITCH), h: minH };
 }
 
 /** Port position relative to the block's top-left corner. */
-export function placePoint(place: PortPlace, size: { w: number; h: number }): Point {
-  const body = size.h - HEADER - BOTTOM_PAD;
+export function placePoint(place: PortPlace, size: BlockSize): Point {
+  const top = size.top ?? HEADER;
+  const body = size.h - top - (size.bottom ?? BOTTOM_PAD);
   switch (place.side) {
     case "left":
-      return { x: 0, y: HEADER + place.offset * body };
+      return { x: 0, y: top + place.offset * body };
     case "right":
-      return { x: size.w, y: HEADER + place.offset * body };
+      return { x: size.w, y: top + place.offset * body };
     case "top":
       return { x: place.offset * size.w, y: 0 };
     default:
@@ -81,8 +152,9 @@ export function placePoint(place: PortPlace, size: { w: number; h: number }): Po
 }
 
 /** Nearest side and snapped offset for a pointer at ``p`` (relative to the block). */
-export function placeFromPoint(p: Point, size: { w: number; h: number }): PortPlace {
-  const body = size.h - HEADER - BOTTOM_PAD;
+export function placeFromPoint(p: Point, size: BlockSize): PortPlace {
+  const top = size.top ?? HEADER;
+  const body = Math.max(size.h - top - (size.bottom ?? BOTTOM_PAD), 1);
   const dist: [Side, number][] = [
     ["left", Math.abs(p.x)],
     ["right", Math.abs(size.w - p.x)],
@@ -92,7 +164,7 @@ export function placeFromPoint(p: Point, size: { w: number; h: number }): PortPl
   const side = dist.reduce((a, b) => (b[1] < a[1] ? b : a))[0];
   if (side === "left" || side === "right") {
     const steps = Math.max(1, Math.round((2 * body) / ROW)); // half-row grid
-    const k = Math.round(((p.y - HEADER) / body) * steps);
+    const k = Math.round(((p.y - top) / body) * steps);
     return { side, offset: Math.min(steps - 1, Math.max(1, k)) / steps };
   }
   const steps = 12;

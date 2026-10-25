@@ -92,7 +92,7 @@ class _ConvParams(BlockParams):
     terminate: bool = Field(True, description="Append K-1 zero tail bits (zero-terminated trellis).")
 
 
-@register_block("conv_encoder", category="coding")
+@register_block("conv_encoder", category="encoder", subcategory="Convolutional Codes", label="Convolutional Encoder")
 class ConvEncoder(Block):
     """Feed-forward convolutional encoder of rate 1/n."""
 
@@ -110,7 +110,7 @@ class ConvEncoder(Block):
         return {"out": x.evolve(out, code_rate=rate)}
 
 
-@register_block("viterbi_decoder", category="coding")
+@register_block("viterbi_decoder", category="decoder", subcategory="Convolutional Codes", label="Viterbi Decoder")
 class ViterbiDecoder(Block):
     """Maximum-likelihood sequence decoder; soft decisions with LLR input, hard with bits."""
 

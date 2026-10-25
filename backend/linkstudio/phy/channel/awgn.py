@@ -10,7 +10,7 @@ from pydantic import Field
 from linkstudio.core import Block, BlockError, BlockParams, Kind, Port, RunContext, Signal, register_block
 
 
-@register_block("awgn", category="channel")
+@register_block("awgn", category="medium", subcategory="Generic", label="AWGN Channel")
 class AWGN(Block):
     """Add circularly-symmetric complex Gaussian noise.
 

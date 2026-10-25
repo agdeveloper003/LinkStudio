@@ -70,7 +70,7 @@ export function LinePlot({ x, series, xlabel, ylabel, xunit, yunit, logY = false
       scales: { x: { time: false }, y: logY ? { distr: 3 } : { auto: true } },
       axes: [
         { ...AXIS, label: xTitle, size: 34, labelSize: 14, space: 60 },
-        { ...AXIS, label: yTitle, size: 56, labelSize: 14, space: 30, values: logY ? (_u, v) => v.map((n) => n.toExponential(0)) : undefined },
+        { ...AXIS, label: yTitle, size: 56, labelSize: 14, space: 30, values: logY ? (_u, v) => v.map((n) => (n == null ? "" : n.toExponential(0))) : undefined },
       ],
       series: [
         {},

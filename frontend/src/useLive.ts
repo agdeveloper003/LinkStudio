@@ -7,6 +7,7 @@ export interface LiveFrame {
   probes: Record<string, ProbeResult>;
   errors: string[];
   step_ms: number;
+  displays?: Record<string, Record<string, unknown>>;
 }
 
 export interface LiveState {

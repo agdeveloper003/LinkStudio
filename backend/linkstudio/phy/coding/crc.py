@@ -47,7 +47,7 @@ class _CRCParams(BlockParams):
     polynomial: Literal["crc8", "crc16", "crc24a", "crc32"] = Field("crc16", description="CRC generator.")
 
 
-@register_block("crc_encoder", category="coding")
+@register_block("crc_encoder", category="encoder", subcategory="Error Detection", label="CRC Encoder")
 class CRCEncoder(Block):
     """Append CRC parity bits to every frame."""
 
@@ -63,7 +63,7 @@ class CRCEncoder(Block):
         return {"out": x.evolve(out, code_rate=rate)}
 
 
-@register_block("crc_decoder", category="coding")
+@register_block("crc_decoder", category="decoder", subcategory="Error Detection", label="CRC Decoder")
 class CRCDecoder(Block):
     """Check and strip the CRC; reports the frame error rate detected by the CRC."""
 

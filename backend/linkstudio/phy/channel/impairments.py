@@ -20,7 +20,7 @@ def _require_fs(x: Signal, what: str) -> float:
     return x.fs
 
 
-@register_block("gain", category="channel")
+@register_block("gain", category="amplifier", subcategory="Electrical", label="Gain")
 class Gain(Block):
     """Scale the signal by ``gain_db`` (e.g. path loss). Noise metadata is scaled too."""
 
@@ -39,7 +39,7 @@ class Gain(Block):
         return {"out": x.evolve(x.data * g, **meta)}
 
 
-@register_block("carrier_offset", category="channel")
+@register_block("carrier_offset", category="impairment", subcategory="RF Front-End", label="Carrier Frequency Offset")
 class CarrierOffset(Block):
     """Carrier frequency offset and phase rotation: y = x * exp(j(2 pi cfo t + phi))."""
 
@@ -62,7 +62,7 @@ class CarrierOffset(Block):
         return {"out": x.evolve(x.data * np.exp(1j * phase))}
 
 
-@register_block("phase_noise", category="channel")
+@register_block("phase_noise", category="impairment", subcategory="RF Front-End", label="Phase Noise")
 class PhaseNoise(Block):
     """Oscillator phase noise modelled as a Wiener process with 3-dB ``linewidth_hz``."""
 
@@ -79,7 +79,7 @@ class PhaseNoise(Block):
         return {"out": x.evolve(x.data * np.exp(1j * phi))}
 
 
-@register_block("timing_offset", category="channel")
+@register_block("timing_offset", category="impairment", subcategory="Timing", label="Timing Offset")
 class TimingOffset(Block):
     """Delay the signal by a (fractional) number of samples, keeping its length."""
 
@@ -102,7 +102,7 @@ class TimingOffset(Block):
         return {"out": x.evolve(y)}
 
 
-@register_block("iq_imbalance", category="channel")
+@register_block("iq_imbalance", category="impairment", subcategory="RF Front-End", label="IQ Imbalance")
 class IQImbalance(Block):
     """Receiver IQ imbalance and DC offset: y = K1 x + K2 conj(x) + dc."""
 
@@ -124,7 +124,7 @@ class IQImbalance(Block):
         return {"out": x.evolve(k1 * x.data + k2 * np.conj(x.data) + complex(p.dc_i, p.dc_q))}
 
 
-@register_block("power_amplifier", category="channel")
+@register_block("power_amplifier", category="impairment", subcategory="RF Front-End", label="Power Amplifier Nonlinearity")
 class PowerAmplifier(Block):
     """Memoryless PA nonlinearity (Rapp, Saleh or ideal clipper).
 
@@ -166,7 +166,7 @@ class PowerAmplifier(Block):
         return {"out": x.evolve(y)}
 
 
-@register_block("quantizer", category="channel")
+@register_block("quantizer", category="impairment", subcategory="Data Converters", label="ADC Quantizer")
 class Quantizer(Block):
     """Uniform mid-rise ADC on I and Q with clipping.
 

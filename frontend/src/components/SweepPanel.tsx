@@ -2,7 +2,10 @@ import { useMemo, useRef, useState } from "react";
 import type { EditorGraph } from "../api";
 import { SERIES_COLORS } from "../theme";
 import { useJob } from "../useJob";
-import { DEFAULT_STOP, ProgressBar, ResourceFields, StopRuleEditor, fmt, stopConfig, type Resources, type StopRule } from "./common";
+import {
+  DEFAULT_STOP, FloatingWindow, ProgressBar, ResourceFields, ResultsToggle, SettingsMenu, StopRuleEditor, fmt, stopConfig,
+  type Resources, type StopRule,
+} from "./common";
 import { LinePlot, type LineSeries } from "./plots/LinePlot";
 
 interface Props {
@@ -12,6 +15,8 @@ interface Props {
   scenarioName: string;
   blocked?: string;
   resources: Resources;
+  /** This mode is the one selected in the top bar. */
+  active: boolean;
 }
 
 interface KeptCurve {
@@ -49,7 +54,8 @@ function alignCurves(curves: KeptCurve[]): { x: number[]; ys: (number | null)[][
   return { x, ys };
 }
 
-export function SweepPanel({ getGraph, numericParams, theory, scenarioName, blocked, resources }: Props) {
+/** Parameter-sweep controls for the top bar, with the curves in a floating window. */
+export function SweepPanel({ getGraph, numericParams, theory, scenarioName, blocked, resources, active }: Props) {
   const [rows, setRows] = useState<Row[]>([{ path: "", values: "0:2:10" }]);
   const [rule, setRule] = useState<StopRule>({ ...DEFAULT_STOP, mode: "metric" });
   const [metric, setMetric] = useState("");
@@ -57,6 +63,7 @@ export function SweepPanel({ getGraph, numericParams, theory, scenarioName, bloc
   const [theoryKey, setTheoryKey] = useState("");
   const [showTable, setShowTable] = useState(false);
   const [kept, setKept] = useState<KeptCurve[]>([]);
+  const [showResults, setShowResults] = useState(false);
   const plotBox = useRef<HTMLDivElement>(null);
   const { job, error, busy, run, cancel } = useJob();
 
@@ -130,6 +137,7 @@ export function SweepPanel({ getGraph, numericParams, theory, scenarioName, bloc
     const params: Record<string, number[]> = {};
     for (const r of effRows) if (r.path) params[r.path] = parseValues(r.values);
     run("sweep", getGraph(), { params, theory: theoryKey || undefined, ...stopConfig(rule), workers: resources.workers });
+    setShowResults(true);
   };
 
   const downloadCsv = () => {
@@ -144,90 +152,80 @@ export function SweepPanel({ getGraph, numericParams, theory, scenarioName, bloc
     URL.revokeObjectURL(url);
   };
 
+  if (!active) return null;
+
   return (
-    <div className="run-panel">
-      <div className="run-controls">
-        {busy ? (
-          <button className="danger" onClick={cancel}>■ Cancel</button>
-        ) : (
-          <button className="primary" onClick={start} disabled={!defaultPath || !!blocked} title={blocked}>▶ Run sweep</button>
+    <>
+      {busy ? (
+        <button className="danger" onClick={cancel}>■ Cancel</button>
+      ) : (
+        <button className="primary" onClick={start} disabled={!defaultPath || !!blocked} title={blocked}>▶ Run</button>
+      )}
+      <SettingsMenu title="Sweep settings">
+        <div className="section-title">Parameters</div>
+        {effRows.map((r, i) => (
+          <div key={i} className="sweep-row">
+            <select value={r.path} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, path: e.target.value } : x)))}>
+              {numericParams.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <input
+              className="text"
+              value={r.values}
+              title="start:step:stop or comma-separated values"
+              onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, values: e.target.value } : x)))}
+            />
+            {rows.length > 1 && (
+              <button className="icon-btn" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
+            )}
+          </div>
+        ))}
+        {rows.length < 2 && (
+          <button className="link" onClick={() => setRows([...rows, { path: "", values: "4, 16" }])}>
+            + second parameter (one curve per value)
+          </button>
         )}
-        {blocked && <span className="field-error blocked">{blocked}</span>}
+        <label className="inline" title="Theory curves are BER vs Eb/N0: sweep an AWGN block in 'ebn0' mode.">
+          theory
+          <select value={theoryKey} onChange={(e) => setTheoryKey(e.target.value)}>
+            <option value="">none</option>
+            {Object.entries(theory).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <div className="section-title">Stop rule</div>
         <StopRuleEditor rule={rule} onChange={setRule} />
         <ResourceFields res={resources} />
-        {job && <ProgressBar value={job.progress} status={job.status} />}
-        {job && <span className="muted small">{job.status} · {job.message} · {fmt(job.elapsed_s)} s</span>}
-        {(error || job?.error) && <span className="field-error">{error ?? job?.error}</span>}
-      </div>
-      <div className="run-body">
-        <div className="run-side sweep-side">
-          <div className="section-title">Parameters</div>
-          {effRows.map((r, i) => (
-            <div key={i} className="sweep-row">
-              <select value={r.path} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, path: e.target.value } : x)))}>
-                {numericParams.map((p) => (
-                  <option key={p} value={p}>{p}</option>
+      </SettingsMenu>
+      <ResultsToggle open={showResults} onToggle={() => setShowResults(!showResults)} error={error ?? job?.error ?? undefined} />
+      {job && <ProgressBar value={job.progress} status={job.status} />}
+      {showResults && (
+        <FloatingWindow id="sweep" title="Sweep results" initial={{ x: 260, y: 70, w: 640, h: 440 }} onClose={() => setShowResults(false)}>
+          <div className="sweep-toolbar">
+            <label className="inline">
+              y
+              <select value={yKey} onChange={(e) => setMetric(e.target.value)}>
+                {metricKeys.length === 0 && <option value="">(run first)</option>}
+                {metricKeys.map((k) => (
+                  <option key={k} value={k}>{k}</option>
                 ))}
               </select>
-              <input
-                className="text"
-                value={r.values}
-                title="start:step:stop or comma-separated values"
-                onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, values: e.target.value } : x)))}
-              />
-              {rows.length > 1 && (
-                <button className="icon-btn" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
-              )}
-            </div>
-          ))}
-          {rows.length < 2 && (
-            <button className="link" onClick={() => setRows([...rows, { path: "", values: "4, 16" }])}>
-              + second parameter (one curve per value)
-            </button>
-          )}
-          <div className="section-title">Plot</div>
-          <label className="inline">
-            y
-            <select value={yKey} onChange={(e) => setMetric(e.target.value)}>
-              {metricKeys.length === 0 && <option value="">(run first)</option>}
-              {metricKeys.map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          </label>
-          <label className="inline">
-            <input type="checkbox" checked={logY} onChange={(e) => setLogY(e.target.checked)} /> log scale
-          </label>
-          <label className="inline" title="Theory curves are BER vs Eb/N0: sweep an AWGN block in 'ebn0' mode.">
-            theory
-            <select value={theoryKey} onChange={(e) => setTheoryKey(e.target.value)}>
-              <option value="">none</option>
-              {Object.entries(theory).map(([k, label]) => (
-                <option key={k} value={k}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="button-row">
-            <button onClick={() => setShowTable(!showTable)} disabled={!records.length}>
-              {showTable ? "Hide table" : "Show table"}
-            </button>
+            </label>
+            <label className="inline">
+              <input type="checkbox" checked={logY} onChange={(e) => setLogY(e.target.checked)} /> log
+            </label>
+            <span className="spacer" />
+            <button onClick={keepCurve} disabled={!current.length} title="Keep this curve to compare with the next runs">Keep</button>
+            <button onClick={() => setKept([])} disabled={!kept.length} title="Clear kept curves">Clear ({kept.length})</button>
+            <button onClick={() => setShowTable(!showTable)} disabled={!records.length}>{showTable ? "Plot" : "Table"}</button>
             <button onClick={downloadCsv} disabled={!records.length}>CSV</button>
             <button onClick={downloadPng} disabled={!plot}>PNG</button>
           </div>
-          <div className="button-row">
-            <button onClick={keepCurve} disabled={!current.length} title="Keep this curve to compare with the next runs">Keep curve</button>
-            <button onClick={() => setKept([])} disabled={!kept.length}>Clear kept ({kept.length})</button>
-          </div>
-        </div>
-        <div className="sweep-main">
-          <div className="sweep-plot" ref={plotBox}>
-            {plot ? (
-              <LinePlot x={plot.x} series={plot.series} xlabel={plot.xKey} ylabel={yKey} logY={logY} />
-            ) : (
-              <div className="scope-empty">Choose a parameter and value range, then run the sweep.</div>
-            )}
-          </div>
-          {records.length > 0 && showTable && (
+          {job && <div className="muted small float-status">{job.status} · {job.message} · {fmt(job.elapsed_s)} s</div>}
+          {(error || job?.error) && <div className="field-error">{error ?? job?.error}</div>}
+          {records.length > 0 && showTable ? (
             <div className="sweep-table">
               <table className="metrics">
                 <thead>
@@ -240,9 +238,17 @@ export function SweepPanel({ getGraph, numericParams, theory, scenarioName, bloc
                 </tbody>
               </table>
             </div>
+          ) : (
+            <div className="sweep-plot" ref={plotBox}>
+              {plot ? (
+                <LinePlot x={plot.x} series={plot.series} xlabel={plot.xKey} ylabel={yKey} logY={logY} />
+              ) : (
+                <div className="scope-empty">Set the parameter range in ⚙, then run the sweep.</div>
+              )}
+            </div>
           )}
-        </div>
-      </div>
-    </div>
+        </FloatingWindow>
+      )}
+    </>
   );
 }

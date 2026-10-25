@@ -65,7 +65,7 @@ class _LayoutParams(BlockParams):
     pilot_spacing: int = Field(6, ge=0, description="Pilot every N active subcarriers (0: no pilots).")
 
 
-@register_block("ofdm_modulator", category="waveform")
+@register_block("ofdm_modulator", category="modulator", subcategory="Multicarrier", label="OFDM Modulator")
 class OFDMModulator(Block):
     """Map data symbols and pilots on subcarriers, IFFT and add the cyclic prefix.
 
@@ -111,7 +111,7 @@ class OFDMModulator(Block):
         return {"out": Signal(frame, Kind.SAMPLES, fs=fs, meta=meta)}
 
 
-@register_block("ofdm_sync", category="sync")
+@register_block("ofdm_sync", category="synchronization", subcategory="Frame", label="OFDM Synchronizer")
 class OFDMSync(Block):
     """Blind OFDM timing and fractional CFO synchronization from the cyclic prefix (van de Beek).
 
@@ -172,7 +172,7 @@ class OFDMSync(Block):
         return {"cfo_estimate": float(np.mean(self._cfo)), "timing_offset": float(np.mean(self._delay))}
 
 
-@register_block("ofdm_demodulator", category="waveform")
+@register_block("ofdm_demodulator", category="demodulator", subcategory="Multicarrier", label="OFDM Demodulator")
 class OFDMDemodulator(Block):
     """Remove the cyclic prefix and FFT every OFDM symbol into a resource grid.
 
@@ -207,7 +207,7 @@ class OFDMDemodulator(Block):
         return {"out": Signal(grid, Kind.GRID, fs=x.fs, meta={**x.meta, "ofdm": lay})}
 
 
-@register_block("ofdm_channel_estimator", category="receiver")
+@register_block("ofdm_channel_estimator", category="detector", subcategory="Channel Estimation", label="OFDM Channel Estimator")
 class OFDMChannelEstimator(Block):
     """Estimate the channel frequency response on every subcarrier.
 
@@ -280,7 +280,7 @@ class OFDMChannelEstimator(Block):
         return np.broadcast_to(H, (B, n_sym, lay.n_fft))
 
 
-@register_block("ofdm_equalizer", category="receiver")
+@register_block("ofdm_equalizer", category="equalizer", subcategory="Channel-Based", label="OFDM Equalizer")
 class OFDMEqualizer(Block):
     """Extract the data subcarriers and equalize them (one-tap ZF per subcarrier).
 

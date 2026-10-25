@@ -29,7 +29,7 @@ def _gains_at_symbols(csi: Signal, n_symbols: int) -> np.ndarray:
     return h
 
 
-@register_block("one_tap_equalizer", category="receiver")
+@register_block("one_tap_equalizer", category="equalizer", subcategory="Channel-Based", label="One-Tap Equalizer")
 class OneTapEqualizer(Block):
     """Coherent equalization of flat fading with known gains (``csi`` input).
 
@@ -58,7 +58,7 @@ class OneTapEqualizer(Block):
         return {"out": x.evolve(y, noise_var=nv)}
 
 
-@register_block("linear_equalizer", category="receiver")
+@register_block("linear_equalizer", category="equalizer", subcategory="Channel-Based", label="Linear Equalizer")
 class LinearEqualizer(Block):
     """FIR equalizer designed from the known channel impulse response (``csi`` input).
 
@@ -109,7 +109,7 @@ class LinearEqualizer(Block):
         return {"out": x.evolve(y, noise_var=new_nv)}
 
 
-@register_block("lms_equalizer", category="receiver")
+@register_block("lms_equalizer", category="equalizer", subcategory="Adaptive", label="LMS Equalizer")
 class LMSEqualizer(Block):
     """Adaptive (N)LMS FIR equalizer: trained on known symbols, then decision directed.
 

@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
-import type { Catalogue, EditorGraph, Probe, Validation } from "../api";
+import type { Catalogue, EditorGraph, Validation } from "../api";
 import type { BlockNodeType } from "../graph";
-import { CATEGORY_COLORS, kindColor } from "../theme";
+import { CATEGORY_COLORS, CATEGORY_LABELS } from "../theme";
 import { FrequencyResponse } from "./FrequencyResponse";
 import { ParamField } from "./ParamField";
+import { PanelTitle } from "./common";
 
 interface Props {
   catalogue: Catalogue;
   node: BlockNodeType | null;
-  probes: Probe[];
   validation: Validation | null;
   scenario: { name: string; description: string; category: string; categories: string[]; blocks: number; edges: number };
   onParam: (node: string, param: string, value: unknown) => void;
   onRename: (oldName: string, newName: string) => string | null;
-  onToggleProbe: (key: string) => void;
   onDelete: (node: string) => void;
   onDuplicate: (node: string) => void;
   onScenarioChange: (patch: { name?: string; description?: string; category?: string }) => void;
+  onClose: () => void;
   getGraph: () => EditorGraph;
   /** Key of the graph structure and parameters (refreshes the frequency response). */
   structureKey: string;
@@ -32,12 +32,16 @@ export function Inspector(props: Props) {
 
   return (
     <aside className="inspector">
-      <div className="panel-title">Inspector</div>
+      <PanelTitle title="Inspector" onClose={props.onClose} shortcut="Ctrl+I" />
       <RenameField name={node.id} onRename={(n) => props.onRename(node.id, n)} />
       <div className="block-type">
         <span className="cat-dot" style={{ background: CATEGORY_COLORS[category] }} />
-        {node.data.type}
-        <span className="muted">· {category}</span>
+        <span className="block-type-label">{info?.label ?? node.data.type}</span>
+        <code className="muted">{node.data.type}</code>
+      </div>
+      <div className="block-class muted">
+        {CATEGORY_LABELS[category] ?? category}
+        {info?.subcategory ? ` › ${info.subcategory}` : ""}
       </div>
       <p className="doc">{doc}</p>
 
@@ -64,25 +68,6 @@ export function Inspector(props: Props) {
       )}
 
       <FrequencyResponse block={node.id} getGraph={props.getGraph} refreshKey={props.structureKey} />
-
-      {node.data.outputs.length > 0 && (
-        <div className="section">
-          <div className="section-title">Probes</div>
-          {node.data.outputs.map((o) => {
-            const key = `${node.id}.${o.name}`;
-            const on = props.probes.some((p) => p.key === key);
-            return (
-              <label key={o.name} className="probe-toggle">
-                <input type="checkbox" checked={on} onChange={() => props.onToggleProbe(key)} />
-                <span className="kind-chip" style={{ borderColor: kindColor(o.kinds), color: kindColor(o.kinds) }}>
-                  {o.kinds}
-                </span>
-                {o.name}
-              </label>
-            );
-          })}
-        </div>
-      )}
 
       <div className="block-actions">
         <button onClick={() => props.onDuplicate(node.id)} title="Duplicate (Ctrl+D)">Duplicate</button>
@@ -118,10 +103,10 @@ function RenameField({ name, onRename }: { name: string; onRename: (n: string) =
   );
 }
 
-function ScenarioInfo({ scenario, validation, onScenarioChange }: Props) {
+function ScenarioInfo({ scenario, validation, onScenarioChange, onClose }: Props) {
   return (
     <aside className="inspector">
-      <div className="panel-title">Scenario</div>
+      <PanelTitle title="Scenario" onClose={onClose} shortcut="Ctrl+I" />
       <div className="param">
         <label className="param-label">name</label>
         <input className="text" value={scenario.name} onChange={(e) => onScenarioChange({ name: e.target.value })} />
@@ -162,9 +147,9 @@ function ScenarioInfo({ scenario, validation, onScenarioChange }: Props) {
           <li>Connect an output to an input; colors show the signal kind.</li>
           <li>Ctrl + drag a port to move it around the block border.</li>
           <li>Blocks snap so that connected ports line up; links route around blocks.</li>
-          <li>Select a block to edit its parameters and add probes on its outputs.</li>
-          <li><b>Live</b> streams scopes and reacts to parameter changes instantly.</li>
-          <li><b>Simulate</b> runs a Monte-Carlo job; <b>Sweep</b> draws curves vs a parameter.</li>
+          <li>Select a block to edit its parameters.</li>
+          <li>Pick <b>Live</b>, <b>Simulate</b> or <b>Sweep</b> in the top bar, set it up with ⚙ and press run; results open in a floating window.</li>
+          <li><b>Live</b> reacts to parameter changes instantly; <b>Sweep</b> draws curves vs a parameter.</li>
           <li>Shift / Ctrl + click or drag a box to select several blocks.</li>
         </ul>
       </div>
@@ -178,6 +163,7 @@ function ScenarioInfo({ scenario, validation, onScenarioChange }: Props) {
             <tr><td>Ctrl+C / Ctrl+V</td><td>copy / paste blocks</td></tr>
             <tr><td>Ctrl+D</td><td>duplicate selection</td></tr>
             <tr><td>Ctrl+L</td><td>automatic layout</td></tr>
+            <tr><td>Ctrl+B / Ctrl+I</td><td>show / hide blocks / inspector</td></tr>
             <tr><td>Del</td><td>delete selection</td></tr>
           </tbody>
         </table>

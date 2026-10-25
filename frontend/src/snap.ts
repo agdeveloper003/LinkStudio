@@ -113,3 +113,32 @@ export function straighten(nodes: BlockNodeType[], edges: Edge[]): BlockNodeType
   }
   return nodes.map((n) => byId.get(n.id)!);
 }
+
+/**
+ * After the automatic layout (a fixed grid): push blocks down until none overlaps a block
+ * above it, using the real block sizes. Blocks with ports on the bottom side keep extra
+ * room below for the links that enter there.
+ */
+export function spread(nodes: BlockNodeType[]): BlockNodeType[] {
+  const GAP = 30;
+  const placed: { id: string; r: Rect; below: number }[] = [];
+  const out = new Map<string, BlockNodeType>();
+  for (const n of [...nodes].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)) {
+    let r = nodeRect(n);
+    for (let moved = true; moved; ) {
+      moved = false;
+      for (const o of placed) {
+        const overlapX = r.x < o.r.x + o.r.w + 10 && o.r.x < r.x + r.w + 10;
+        const bottom = o.r.y + o.r.h + o.below;
+        if (overlapX && r.y < bottom && r.y + r.h > o.r.y - GAP) {
+          r = { ...r, y: bottom };
+          moved = true;
+        }
+      }
+    }
+    const south = Object.values(portPlaces(n.data)).some((p) => p.side === "bottom");
+    placed.push({ id: n.id, r, below: GAP + (south ? 40 : 0) });
+    out.set(n.id, r.y === n.position.y ? n : { ...n, position: { x: n.position.x, y: r.y } });
+  }
+  return nodes.map((n) => out.get(n.id)!);
+}

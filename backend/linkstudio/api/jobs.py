@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 
 from linkstudio.api.editor import build_graph
-from linkstudio.api.probes import compute_probes
+from linkstudio.api.probes import compute_probes, scope_probes
 from linkstudio.core import Simulation, StopCriteria, Sweep
 from linkstudio.core.parallel import cpu_count
 from linkstudio.phy import theory
@@ -120,7 +120,7 @@ class JobManager:
     def _run_simulation(self, job: Job, graph, editor: dict[str, Any], cfg: dict[str, Any]) -> None:
         n_batches, stop = self._stop(cfg)
         total = n_batches or (stop.max_batches if stop else 1)
-        probes = editor.get("probes") or []
+        probes = scope_probes(editor)
         sim = Simulation(graph, batch_size=int(editor.get("batch_size", 32)), seed=int(editor.get("seed", 0)))
 
         def on_batch(n: int, metrics: dict[str, float]) -> bool:

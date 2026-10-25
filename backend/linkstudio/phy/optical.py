@@ -132,7 +132,7 @@ def mzm_field(v: np.ndarray, v_pi: float, extinction_ratio_db: float | None = No
     return ((1 + d) / 2 * np.exp(2j * theta) - (1 - d) / 2) / 1j
 
 
-@register_block("intensity_modulator", category="optical")
+@register_block("intensity_modulator", category="modulator", subcategory="Optical", label="Intensity Modulator")
 class IntensityModulator(Block):
     """Ideal intensity modulation for IM/DD links (PAM-M power levels set by the extinction ratio).
 
@@ -179,7 +179,7 @@ class IntensityModulator(Block):
         return {"out": Signal(field, Kind.SAMPLES, fs=fs, meta=meta)}
 
 
-@register_block("mach_zehnder_modulator", category="optical")
+@register_block("mach_zehnder_modulator", category="modulator", subcategory="Optical", label="Mach-Zehnder Modulator")
 class MachZehnderModulator(Block):
     """CW laser and external Mach-Zehnder modulator for IM/DD (lithium-niobate MZM).
 
@@ -243,7 +243,7 @@ class MachZehnderModulator(Block):
         return dict(self._last) if hasattr(self, "_last") else {}
 
 
-@register_block("iq_modulator", category="optical")
+@register_block("iq_modulator", category="modulator", subcategory="Optical", label="Optical IQ Modulator")
 class IQModulator(Block):
     """Laser + nested IQ Mach-Zehnder modulator for coherent transmission (single or dual polarization).
 
@@ -476,7 +476,7 @@ class _FiberParams(BlockParams):
     polarization_rotation: bool = Field(False, description="Random polarization state per frame.")
 
 
-@register_block("fiber", category="optical")
+@register_block("fiber", category="medium", subcategory="Fiber", label="Single-Mode Fiber")
 class Fiber(Block):
     """Single-mode fiber span: attenuation, chromatic dispersion, optional Kerr nonlinearity and PMD."""
 
@@ -543,7 +543,7 @@ def saturated_gain(g0: float, p_in_w: float, p_sat_w: float) -> float:
     return float(brentq(lambda g: g - g0 * np.exp(-(g - 1) * p_in_w / p_sat_w), 1.0, g0))
 
 
-@register_block("optical_amplifier", category="optical")
+@register_block("optical_amplifier", category="amplifier", subcategory="Optical", label="Optical Amplifier (EDFA, SOA)")
 class OpticalAmplifier(Block):
     """Optical amplifier (EDFA, SOA) with amplified spontaneous emission noise.
 
@@ -600,7 +600,7 @@ class OpticalAmplifier(Block):
         return out
 
 
-@register_block("optical_attenuator", category="optical")
+@register_block("optical_attenuator", category="amplifier", subcategory="Optical", label="Optical Attenuator")
 class OpticalAttenuator(Block):
     """Passive loss: variable optical attenuator, 1xN power splitter, connectors.
 
@@ -632,7 +632,7 @@ class OpticalAttenuator(Block):
         return {"out": x.evolve(x.data * np.sqrt(a), **meta)}
 
 
-@register_block("optical_link", category="optical")
+@register_block("optical_link", category="medium", subcategory="Fiber", label="Amplified Optical Link")
 class OpticalLink(Block):
     """Multi-span amplified link: ``n_spans`` x (connectors + fiber span + optional Raman + EDFA).
 
@@ -720,7 +720,7 @@ class OpticalLink(Block):
         return dict(self._last) if hasattr(self, "_last") else {}
 
 
-@register_block("wdm_multiplexer", category="optical")
+@register_block("wdm_multiplexer", category="multiplexer", subcategory="Wavelength", label="WDM Multiplexer")
 class WDMMultiplexer(Block):
     """Wavelength-division multiplexing: add neighbouring channels around the channel under test.
 
@@ -772,7 +772,7 @@ class WDMMultiplexer(Block):
         return {"out": x.evolve(out, wdm={"n_channels": p.n_channels, "spacing_hz": p.spacing_ghz * 1e9})}
 
 
-@register_block("wdm_demultiplexer", category="optical")
+@register_block("wdm_demultiplexer", category="demultiplexer", subcategory="Wavelength", label="WDM Demultiplexer")
 class WDMDemultiplexer(Block):
     """Select one WDM channel with an optical band-pass filter (rectangular or 2nd-order super-Gaussian)."""
 
@@ -834,7 +834,7 @@ def geometric_loss_db(distance_m: float, divergence_mrad: float, rx_aperture_m: 
     return max(0.0, 20 * np.log10(beam / rx_aperture_m))
 
 
-@register_block("fso_turbulence", category="optical")
+@register_block("fso_turbulence", category="medium", subcategory="Free-Space Optics", label="FSO Turbulence")
 class FSOTurbulence(Block):
     """Free-space optical scintillation: log-normal (weak) or gamma-gamma (moderate/strong).
 
@@ -878,7 +878,7 @@ class FSOTurbulence(Block):
         return {"out": x.evolve(x.data * gain), "csi": csi}
 
 
-@register_block("fso_channel", category="optical")
+@register_block("fso_channel", category="medium", subcategory="Free-Space Optics", label="FSO Channel")
 class FSOChannel(Block):
     """Terrestrial free-space optical link from geometry and weather.
 
@@ -954,7 +954,7 @@ class _DetectorParams(BlockParams):
     shot_noise: bool = True
 
 
-@register_block("photodiode", category="optical")
+@register_block("photodiode", category="demodulator", subcategory="Optical", label="Photodiode Receiver (PIN, APD)")
 class Photodiode(Block):
     """Direct-detection receiver: PIN or APD photodiode and transimpedance amplifier (TIA).
 
@@ -1022,7 +1022,7 @@ class Photodiode(Block):
         return {"out": Signal(current * gain, Kind.SAMPLES, fs=x.fs, meta=meta)}
 
 
-@register_block("coherent_receiver", category="optical")
+@register_block("coherent_receiver", category="demodulator", subcategory="Optical", label="Coherent Optical Receiver")
 class CoherentReceiver(Block):
     """Coherent front-end: local oscillator, 90-degree hybrid and balanced photodiodes.
 
@@ -1075,7 +1075,7 @@ class CoherentReceiver(Block):
         return {"out": Signal(beat + noise, Kind.SAMPLES, fs=fs, meta=meta)}
 
 
-@register_block("agc", category="receiver")
+@register_block("agc", category="amplifier", subcategory="Gain Control", label="Automatic Gain Control")
 class AGC(Block):
     """Automatic gain control: remove the mean (optional) and scale every frame and stream
     to the nominal symbol power (``power`` metadata of the upstream mapper / line code).
@@ -1113,7 +1113,7 @@ class AGC(Block):
 
 
 # --------------------------------------------------------------- coherent DSP
-@register_block("cd_compensation", category="optical")
+@register_block("cd_compensation", category="equalizer", subcategory="Dispersion Compensation", label="Chromatic Dispersion Compensation")
 class CDCompensation(Block):
     """Frequency-domain chromatic dispersion compensation (inverse all-pass filter).
 
@@ -1144,7 +1144,7 @@ class CDCompensation(Block):
                                 cd_compensated_ps_nm=x.meta.get("cd_compensated_ps_nm", 0.0) + cd)}
 
 
-@register_block("fo_compensation", category="sync")
+@register_block("fo_compensation", category="synchronization", subcategory="Carrier", label="Frequency Offset Compensation")
 class FOCompensation(Block):
     """Blind frequency-offset estimation from the spectral peak of the M-th power
     (M = 4 for QPSK / square QAM), joint over polarizations, and correction.
@@ -1199,7 +1199,7 @@ class FOCompensation(Block):
         return {"fo_estimate_hz": float(np.mean(self._estimates))} if self._estimates else {}
 
 
-@register_block("adaptive_mimo_equalizer", category="receiver")
+@register_block("adaptive_mimo_equalizer", category="equalizer", subcategory="Adaptive", label="Adaptive MIMO Equalizer")
 class AdaptiveMIMOEqualizer(Block):
     """Fractionally spaced 2x2 (NxN) butterfly FIR equalizer for coherent receivers.
 
@@ -1269,7 +1269,7 @@ class AdaptiveMIMOEqualizer(Block):
         return {"out": Signal(out, Kind.SYMBOLS, fs=x.fs / sps if x.fs else None, meta={**x.meta, **meta})}
 
 
-@register_block("phase_recovery", category="sync")
+@register_block("phase_recovery", category="synchronization", subcategory="Carrier", label="Carrier Phase Recovery")
 class PhaseRecovery(Block):
     """Feed-forward carrier phase recovery for large laser linewidths.
 
@@ -1329,7 +1329,7 @@ class PhaseRecovery(Block):
         return {"out": x.evolve(out)}
 
 
-@register_block("optical_power_meter", category="metrics")
+@register_block("optical_power_meter", category="measurement", subcategory="Power", label="Optical Power Meter")
 class OpticalPowerMeter(Block):
     """Average optical power (dBm) and OSNR (0.1 nm) of an optical signal."""
 

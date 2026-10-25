@@ -44,7 +44,7 @@ def cubic_interpolate(x: np.ndarray, t: np.ndarray) -> np.ndarray:
     return ((c3 * mu + c2) * mu + c1) * mu + x0
 
 
-@register_block("preamble", category="sync")
+@register_block("preamble", category="framing", subcategory="Preamble", label="Preamble Inserter")
 class Preamble(Block):
     """Prepend a known preamble and append guard symbols to every frame.
 
@@ -77,7 +77,7 @@ class Preamble(Block):
                                 n_symbols=out.shape[-1])}
 
 
-@register_block("timing_recovery", category="sync")
+@register_block("timing_recovery", category="synchronization", subcategory="Timing", label="Timing Recovery")
 class TimingRecovery(Block):
     """Symbol timing recovery: Gardner detector, cubic interpolator, second-order loop.
 
@@ -145,7 +145,7 @@ class TimingRecovery(Block):
         return {"timing_offset_sym": float(np.mean(self._last_offset))}
 
 
-@register_block("frame_sync", category="sync")
+@register_block("frame_sync", category="synchronization", subcategory="Frame", label="Frame Synchronizer")
 class FrameSync(Block):
     """Preamble-based frame synchronization.
 
@@ -222,7 +222,7 @@ class FrameSync(Block):
         return {"cfo_estimate": self._cfo_sum / self._frames, "frame_offset": self._offset_sum / self._frames}
 
 
-@register_block("carrier_recovery", category="sync")
+@register_block("carrier_recovery", category="synchronization", subcategory="Carrier", label="Carrier Recovery (PLL)")
 class CarrierRecovery(Block):
     """Decision-directed second-order PLL tracking residual phase and frequency offsets."""
 

@@ -69,7 +69,7 @@ def los_probability(scenario: str, d2d_m: np.ndarray, h_ut: float) -> np.ndarray
     return np.where(d <= 18, 1.0, base * (1 + c * 5 / 4 * (d / 100) ** 3 * np.exp(-d / 150)))
 
 
-@register_block("path_loss", category="channel")
+@register_block("path_loss", category="medium", subcategory="Wireless", label="Path Loss")
 class PathLoss(Block):
     """Distance-dependent path loss and log-normal shadow fading (one value per frame).
 

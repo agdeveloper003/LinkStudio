@@ -6,7 +6,11 @@ from typing import Any
 
 import numpy as np
 
+from linkstudio.core.block import BlockError
+from linkstudio.core.graph import Graph
+from linkstudio.core.registry import get_block_class
 from linkstudio.core.signal import Kind, Signal
+from linkstudio.phy.scopes import Scope
 from linkstudio.phy.dsp.analysis import eye_traces, psd
 
 
@@ -180,14 +184,58 @@ def _csi_view(sig: Signal) -> dict[str, Any]:
     return {"type": "message", "text": f"Unsupported CSI type '{ctype}'."}
 
 
+def scope_probes(editor: dict[str, Any]) -> list[dict[str, str]]:
+    """One probe per connected scope input of an editor graph: the output feeding it.
+
+    Returned as ``{"id": "scope.inN", "key": "block.port", "view": ...}``.
+    """
+    sources = {e["target"]: e["source"] for e in editor.get("edges") or []}
+    probes = []
+    for name, b in (editor.get("blocks") or {}).items():
+        if b.get("type") == "subsystem":
+            continue
+        try:
+            cls = get_block_class(b["type"])
+        except BlockError:
+            continue
+        if not issubclass(cls, Scope):
+            continue
+        for port in cls.inputs:
+            ref = f"{name}.{port}"
+            if ref in sources:
+                probes.append({"id": ref, "key": sources[ref], "view": cls.view})
+    return probes
+
+
+def block_displays(graph: Graph, values: dict[str, Signal]) -> dict[str, Any]:
+    """Live data drawn inside blocks with a custom look (beyond their metrics).
+
+    * ``mimo_channel``: ``gains``, the magnitude |h_rt| (Nr x Nt) of the first frame,
+      averaged over the frame for fast fading.
+    """
+    out: dict[str, Any] = {}
+    for name, block in graph.blocks.items():
+        if block.type_name == "mimo_channel":
+            csi = values.get(f"{name}.csi")
+            if csi is None:
+                continue
+            h = np.abs(np.asarray(csi.data)[0])
+            if h.ndim == 3:  # fast fading: (n, Nr, Nt)
+                h = h.mean(axis=0)
+            out[name] = {"gains": _f(h, 3)}
+    return out
+
+
 def compute_probes(values: dict[str, Signal], probes: list[dict[str, str]]) -> dict[str, Any]:
-    """Plot data for every requested ``{"key": "block.port", "view": ...}`` probe."""
+    """Plot data for every requested ``{"key": "block.port", "view": ...}`` probe, keyed by
+    the probe ``id`` (the scope name) when given, else by ``key``."""
     out: dict[str, Any] = {}
     for probe in probes:
         key = probe["key"]
+        out_key = probe.get("id") or key
         sig = values.get(key)
         if sig is None:
-            out[key] = {"type": "message", "text": f"No signal '{key}'."}
+            out[out_key] = {"type": "message", "text": f"No signal '{key}'."}
             continue
         views = available_views(sig)
         view = probe.get("view") or (views[0] if views else "")
@@ -196,5 +244,5 @@ def compute_probes(values: dict[str, Signal], probes: list[dict[str, str]]) -> d
         except Exception as exc:  # a broken probe must not stop the run
             data = {"type": "message", "text": f"{type(exc).__name__}: {exc}"}
         data.update(view=view, views=views, kind=sig.kind.label())
-        out[key] = data
+        out[out_key] = data
     return out

@@ -35,8 +35,13 @@ export function ProbeView({ name, data, onView, onClose }: Props) {
   );
 }
 
-function render(data: ProbeResult | undefined, color: string) {
-  if (!data) return <div className="scope-empty">Waiting for data…</div>;
+/** The plot matching a probe result (constellation, line, eye or heatmap). */
+export function ScopePlot({ data, empty = "Waiting for data…" }: { data?: ProbeResult; empty?: string }) {
+  return render(data, kindColor(data?.kind), empty);
+}
+
+function render(data: ProbeResult | undefined, color: string, empty = "Waiting for data…") {
+  if (!data) return <div className="scope-empty">{empty}</div>;
   switch (data.type) {
     case "scatter":
       return <Constellation i={data.i} q={data.q} unit={data.unit} refI={data.ref_i} refQ={data.ref_q} color={color} />;

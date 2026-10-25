@@ -12,7 +12,7 @@ from linkstudio.phy.dsp.constellations import Constellation, make_constellation
 Scheme = Literal["psk", "qam", "pam", "custom"]
 
 
-@register_block("mapper", category="modulation")
+@register_block("mapper", category="mapper", subcategory="Constellation", label="Constellation Mapper")
 class Mapper(Block):
     """Map groups of bits onto Gray-labelled constellation points (unit average energy)."""
 
@@ -42,7 +42,7 @@ class Mapper(Block):
         return {"out": Signal(symbols, Kind.SYMBOLS, fs=self.params.symbol_rate, meta=meta)}
 
 
-@register_block("demapper", category="modulation")
+@register_block("demapper", category="demapper", subcategory="Constellation", label="Constellation Demapper")
 class Demapper(Block):
     """Hard or soft (LLR) demapping.
 

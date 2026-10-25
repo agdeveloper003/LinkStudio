@@ -27,7 +27,7 @@ def _cmd_blocks(args: argparse.Namespace) -> int:
         print(f"{cat}:")
         for name in by_cat[cat]:
             doc = catalogue[name]["doc"].splitlines()[0] if catalogue[name]["doc"] else ""
-            print(f"  {name:<24} {doc}")
+            print(f"  {name:<24} {catalogue[name]['label']:<36} {doc}")
     return 0
 
 
@@ -36,7 +36,7 @@ def _cmd_describe(args: argparse.Namespace) -> int:
     if info is None:
         print(f"Unknown block '{args.block}'.", file=sys.stderr)
         return 1
-    print(f"{args.block}  [{info['category']}]\n\n{info['doc']}\n")
+    print(f"{info['label']} ({args.block})  [{info['category']} / {info['subcategory']}]\n\n{info['doc']}\n")
     print("Inputs:")
     for p, d in info["inputs"].items():
         print(f"  {p:<8} {d['kinds']}{'' if d['required'] else ' (optional)'}  {d['doc']}")

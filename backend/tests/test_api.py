@@ -24,10 +24,11 @@ def simple_graph(snr=6.0):
             "awgn": {"type": "awgn", "params": {"snr_db": snr}},
             "demap": {"type": "demapper", "params": {"method": "hard"}},
             "ber": {"type": "ber_meter", "params": {}},
+            "const": {"type": "scope_constellation", "params": {}},
         },
         "edges": [{"source": "src.out", "target": "map.in"}, {"source": "map.out", "target": "awgn.in"},
                   {"source": "awgn.out", "target": "demap.in"}, {"source": "demap.out", "target": "ber.rx"},
-                  {"source": "src.out", "target": "ber.tx"}],
+                  {"source": "src.out", "target": "ber.tx"}, {"source": "awgn.out", "target": "const.in1"}],
         "probes": [{"key": "awgn.out", "view": "constellation"}],
     }
 
@@ -90,7 +91,7 @@ def test_simulation_job(client):
     job = wait(client, job["id"])
     assert job["status"] == "done", job
     assert job["result"]["metrics"]["ber.bits"] == 3 * 8 * 400
-    assert job["result"]["probes"]["awgn.out"]["type"] == "scatter"
+    assert job["result"]["probes"]["const.in1"]["type"] == "scatter"
 
 
 def test_sweep_job_with_theory(client):
@@ -108,6 +109,7 @@ def test_live_websocket(client):
         assert ws.receive_json()["type"] == "started"
         frame = ws.receive_json()
         assert frame["type"] == "frame" and "ber.ber" in frame["metrics"]
+        assert frame["probes"]["const.in1"]["view"] == "constellation"
         ws.send_json({"type": "set_param", "path": "awgn.snr_db", "value": 30.0})
         for _ in range(3):
             frame = ws.receive_json()

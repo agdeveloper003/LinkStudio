@@ -12,6 +12,8 @@ export interface BlockData extends Record<string, unknown> {
   probed: string[];
   /** Ports moved by the user ("in:name" / "out:name"); the others use the default place. */
   ports?: Record<string, PortPlace>;
+  /** Size set by the user on a resizable block; default size otherwise. */
+  size?: { w: number; h: number };
   error?: boolean;
 }
 
@@ -63,6 +65,7 @@ export function toEditorGraph(
       position: { x: n.position.x, y: n.position.y },
       ...(n.data.ports && Object.keys(n.data.ports).length ? { ports: n.data.ports } : {}),
       ...(n.data.spec ? { spec: n.data.spec } : {}),
+      ...(n.data.size ? { size: n.data.size } : {}),
     };
   }
   return {
@@ -99,6 +102,7 @@ export function fromEditorGraph(graph: EditorGraph, catalogue: Catalogue): { nod
         outputs: inst?.outputs ?? fallback.outputs,
         probed: probedBy[name] ?? [],
         ports: b.ports,
+        size: b.size,
       },
     };
   });

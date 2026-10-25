@@ -139,3 +139,18 @@ def test_block_catalogue_has_schemas():
     cat = cs.block_catalogue()
     assert "awgn" in cat and "properties" in cat["awgn"]["params"]
     assert cat["mapper"]["outputs"]["out"]["kinds"] == "SYMBOLS"
+
+
+@pytest.mark.parametrize("p_one,t", [(0.5, 0.1), (0.5, 0.9), (0.3, 0.2)])
+def test_random_bits_transition_probability(p_one, t):
+    from linkstudio.phy.sources import markov_bits
+
+    bits = markov_bits(np.random.default_rng(0), 8, 20000, p_one, t)
+    assert abs(bits.mean() - p_one) < 0.02
+    assert abs((np.diff(bits, axis=1) != 0).mean() - t) < 0.01
+
+
+def test_random_bits_transition_limit():
+    g = cs.Graph()
+    with pytest.raises(Exception, match="at most 0.4"):
+        g.create("src", "random_bits", p_one=0.2, transition_probability=0.5)

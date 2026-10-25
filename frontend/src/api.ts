@@ -8,6 +8,9 @@ export interface PortSpec {
 
 export interface BlockInfo {
   category: string;
+  subcategory: string;
+  /** Readable name for the UI (the registry key stays the identifier). */
+  label: string;
   doc: string;
   inputs: Record<string, PortSpec>;
   outputs: Record<string, PortSpec>;
@@ -55,6 +58,8 @@ export interface EditorBlock {
   position?: { x: number; y: number };
   ports?: Record<string, PortPlace>;
   spec?: Record<string, unknown>;
+  /** Size of a resized block (scopes and display blocks). */
+  size?: { w: number; h: number };
 }
 
 export interface EditorGraph {

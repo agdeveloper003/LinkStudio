@@ -9,7 +9,7 @@ A block declares
 
 Minimal example::
 
-    @register_block("gain", category="channel")
+    @register_block("gain", category="amplifier", subcategory="Electrical", label="Gain")
     class Gain(Block):
         class Params(BlockParams):
             gain_db: float = 0.0
@@ -72,6 +72,8 @@ class Block:
 
     type_name: ClassVar[str] = ""
     category: ClassVar[str] = ""
+    subcategory: ClassVar[str] = ""
+    label: ClassVar[str] = ""
     is_composite: ClassVar[bool] = False
     Params: ClassVar[type[BlockParams]] = BlockParams
     inputs: ClassVar[Mapping[str, Port]] = {}
