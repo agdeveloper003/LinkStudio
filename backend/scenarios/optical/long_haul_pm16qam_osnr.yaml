@@ -1,0 +1,35 @@
+name: 3000 km PM-16QAM OSNR budget
+category: Optical
+description: The OSNR exercise of the course - 40 transparent spans of 75 km (0.2 dB/km), EDFAs
+  with a 5 dB noise figure, 0 dBm launch power and 64 GBd PM-16QAM. The link metric
+  link.osnr_rs_db (noise in B = R_s) is about 15 dB, above the 14 dB a 64 GBd PM-16QAM
+  transceiver needs with soft-decision FEC. Sweep link.n_spans to find the reach.
+seed: 5
+batch_size: 2
+blocks:
+  src: {type: random_bits, params: {n_bits: 32000}}
+  map: {type: mapper, params: {scheme: qam, order: 16, symbol_rate: 64000000000.0}}
+  dmx: {type: stream_demux, params: {n_streams: 2}}
+  tx: {type: pulse_shaper, params: {sps: 2, rolloff: 0.1, span: 32}}
+  mod: {type: iq_modulator, params: {power_dbm: 0.0, linewidth_hz: 100000.0}}
+  link: {type: optical_link, params: {n_spans: 40, span_km: 75.0, attenuation_db_km: 0.2, noise_figure_db: 5.0,
+    polarization_rotation: true}}
+  rx: {type: coherent_receiver, params: {lo_linewidth_hz: 100000.0}}
+  cdc: {type: cd_compensation}
+  mf: {type: matched_filter, params: {decimate: false}}
+  agc: {type: agc, params: {remove_dc: false}}
+  eq: {type: adaptive_mimo_equalizer, params: {n_train: 2048}}
+  cpr: {type: phase_recovery, params: {ref_start: 2200}}
+  mux: {type: stream_mux}
+  demap: {type: demapper, params: {method: hard}}
+  ber: {type: ber_meter, params: {skip_bits: 20000}}
+  evm: {type: evm_meter, params: {skip_symbols: 5000}}
+chain: [src, map, dmx, tx, mod, link, rx, cdc, mf, agc, eq, cpr, mux, demap, ber.rx]
+edges:
+  - dmx.out -> eq.ref
+  - dmx.out -> cpr.ref
+  - src.out -> ber.tx
+  - map.out -> evm.ref
+  - mux.out -> evm.in
+probes:
+  - {key: cpr.out, view: constellation}

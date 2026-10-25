@@ -1,0 +1,28 @@
+name: 10G OOK with a Mach-Zehnder modulator and the dispersion limit
+category: Optical
+description: 10 Gb/s NRZ-OOK from a DFB laser and a push-pull lithium-niobate MZM (quadrature
+  bias, full swing, 4 dB insertion loss) over standard single-mode fiber at 1550 nm into a PIN
+  receiver. The chirp-free signal is limited by chromatic dispersion near
+  L = 1/(10 D R_B^2) = 62.5 km; sweep fib.length_km from 20 to 120 km to see the eye close,
+  or set mod.drive to single_arm to add chirp.
+seed: 1
+batch_size: 16
+blocks:
+  src: {type: random_bits, params: {n_bits: 4000}}
+  lc: {type: line_encoder, params: {code: nrz, symbol_rate: 10000000000.0}}
+  tx: {type: pulse_shaper, params: {shape: rc, sps: 8, rolloff: 0.5}}
+  mod: {type: mach_zehnder_modulator, params: {laser_power_dbm: 13.0, insertion_loss_db: 4.0, linewidth_hz: 1000000.0}}
+  fib: {type: fiber, params: {fiber_type: smf, length_km: 50.0, connector_loss_db: 2.0}}
+  opm: {type: optical_power_meter}
+  pd: {type: photodiode, params: {responsivity: 0.9, thermal_noise_pa_rthz: 20.0, bandwidth_ghz: 7.5}}
+  rx: {type: matched_filter, params: {shape: none}}
+  agc: {type: agc}
+  dec: {type: line_decoder}
+  ber: {type: ber_meter}
+chain: [src, lc, tx, mod, fib, pd, rx, agc, dec, ber.rx]
+edges:
+  - fib.out -> opm.in
+  - src.out -> ber.tx
+probes:
+  - {key: pd.out, view: eye}
+  - {key: mod.out, view: spectrum}

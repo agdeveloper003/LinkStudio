@@ -577,41 +577,332 @@ def fig_soliton():
 
 @figure
 def fig_osnr_spans():
-    spans = np.array([1, 2, 3, 5, 8, 10, 15, 20, 30, 40])
-    sim = []
+    """OSNR exercise of the course: 75 km spans, NF 5 dB, 0 dBm, B = R_s = 64 GHz."""
+    spans = np.array([1, 2, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60])
+    sim, sim_gain = [], []
     for nsp in spans:
+        for gain_db, out in ((None, sim), (14.8, sim_gain)):
+            g = cs.Graph()
+            g.create("src", "random_bits", n_bits=512)
+            g.create("map", "mapper", scheme="psk", order=4, symbol_rate=64e9)
+            g.create("tx", "pulse_shaper", sps=2)
+            g.create("mod", "iq_modulator", power_dbm=0.0, linewidth_hz=0.0)
+            g.create("link", "optical_link", n_spans=int(nsp), span_km=75.0, attenuation_db_km=0.2,
+                     noise_figure_db=5.0, amplifier_gain_db=gain_db)
+            g.chain("src", "map", "tx", "mod", "link")
+            out.append(cs.Simulation(g, batch_size=1).run(n_batches=1)["link.osnr_rs_db"])
+    fine = np.unique(np.round(np.geomspace(1, 60, 80)).astype(int))
+    save("osnr_spans", {"spans": spans, "sim": sim, "sim_gain": sim_gain})
+    save("osnr_spans_theory", {"spans": fine,
+                               "transparent": [theory.osnr_link_db(0.0, int(m), 15.0, 5.0, 64e9) for m in fine],
+                               "gain": [theory.osnr_link_db(0.0, int(m), 15.0, 5.0, 64e9, gain_db=14.8) for m in fine]})
+    with open(OUT / "optical_osnr.tex", "w") as fh:
+        fh.write(f"\\def\\osnrfirst{{{theory.osnr_link_db(0.0, 1, 15.0, 5.0, 64e9):.1f}}}\n")
+        fh.write(f"\\def\\osnrforty{{{theory.osnr_link_db(0.0, 40, 15.0, 5.0, 64e9):.1f}}}\n")
+        fh.write(f"\\def\\osnrdistributed{{{theory.osnr_distributed_db(0.0, 0.2, 1000.0, 5.0, 100e9):.1f}}}\n")
+
+
+@figure
+def fig_osnr_span_length():
+    """1000 km link, 0 dBm, NF 5 dB, B = 100 GHz: OSNR against the span length."""
+    lengths = np.array([10, 20, 25, 40, 50, 100, 125, 200])
+    sim = []
+    for ls in lengths:
+        g = cs.Graph()
+        g.create("src", "random_bits", n_bits=512)
+        g.create("map", "mapper", scheme="psk", order=4, symbol_rate=100e9)
+        g.create("tx", "pulse_shaper", sps=2)
+        g.create("mod", "iq_modulator", power_dbm=0.0, linewidth_hz=0.0)
+        g.create("link", "optical_link", n_spans=int(1000 // ls), span_km=float(ls), noise_figure_db=5.0)
+        g.chain("src", "map", "tx", "mod", "link")
+        sim.append(cs.Simulation(g, batch_size=1).run(n_batches=1)["link.osnr_rs_db"])
+    ls = np.linspace(2, 200, 100)
+    th = [theory.osnr_link_db(0.0, 1, 0.2 * x, 5.0, 100e9) - 10 * np.log10(1000 / x) for x in ls]
+    save("osnr_span_length", {"ls": lengths, "sim": sim})
+    save("osnr_span_length_theory", {"ls": ls, "osnr": th})
+
+
+@figure
+def fig_pam_imdd():
+    """PAM-2 and PAM-4 IM/DD at 10 GBd into a PIN + TIA receiver against the course formula."""
+    from linkstudio.phy.optical import dbm_to_w
+    sigma = 20e-12 * np.sqrt(40e9 / 2)  # 20 pA/sqrt(Hz) over fs / 2 = 20 GHz
+    cols_sim, cols_th = {}, {}
+    fine = np.linspace(-30, -10, 101)
+    cols_th["p"] = fine
+    for order, grid in ((2, np.arange(-25.0, -18.9, 1.0)), (4, np.arange(-18.0, -11.9, 1.0))):
+        g = cs.Graph()
+        g.create("src", "random_bits", n_bits=8000)
+        g.create("map", "mapper", scheme="pam", order=order, symbol_rate=10e9)
+        g.create("tx", "pulse_shaper", shape="rect", sps=4)
+        g.create("mod", "intensity_modulator", power_dbm=-20.0, extinction_ratio_db=10.0)
+        g.create("pd", "photodiode", thermal_noise_pa_rthz=20.0, shot_noise=False, dark_current_na=0.0)
+        g.create("rx", "matched_filter", shape="none")
+        g.create("agc", "agc")
+        g.create("demap", "demapper", method="hard")
+        g.create("ber", "ber_meter")
+        g.chain("src", "map", "tx", "mod", "pd", "rx", "agc", "demap", "ber.rx")
+        g.connect("src", "ber.tx")
+        cols_sim[f"p{order}"] = grid
+        cols_sim[f"ber{order}"] = sweep_ber(g, "mod.power_dbm", grid, max_batches=40, batch_size=16)
+        cols_th[f"ber{order}"] = theory.pam_imdd_ber(order, dbm_to_w(fine), 10.0, 0.8, sigma)
+    save("pam_imdd_sim", cols_sim)
+    save("pam_imdd_theory", cols_th)
+
+
+@figure
+def fig_snr_receivers():
+    """Electrical SNR of PIN + TIA and APD + TIA receivers and the quantum limit (10 Gb/s, B_eq = 10 GHz)."""
+    from linkstudio.core import Kind, Signal
+    from linkstudio.core.registry import create_block
+    p_dbm = np.linspace(-40, 0, 81)
+    p = 1e-3 * 10 ** (p_dbm / 10)
+    beq = 10e9
+    save("snr_receivers", {"p": p_dbm,
+                           "quantum": 10 * np.log10(theory.snr_quantum(p, 1 / (2 * beq))),
+                           "pin": 10 * np.log10(theory.snr_photodiode(p, 1.0, 20e-12, beq)),
+                           "pin_tia": 10 * np.log10(theory.snr_photodiode(p, 1.0, 20e-12, beq, shot=False)),
+                           "apd": 10 * np.log10(theory.snr_photodiode(p, 1.0, 20e-12, beq, 10.0, 7.0))})
+    sims = {"p": np.arange(-35.0, 0.1, 5.0)}
+    for name, params in (("pin", {}), ("apd", {"apd_gain": 10.0, "apd_excess_noise": "power_law",
+                                               "apd_x": np.log(7) / np.log(10)})):
+        vals = []
+        for x in sims["p"]:
+            pw = 1e-3 * 10 ** (x / 10)
+            sig = Signal(np.full((8, 1 << 14), np.sqrt(pw), dtype=complex), Kind.SAMPLES, fs=2 * beq,
+                         meta={"optical": True, "wavelength_nm": 1550.0})
+            blk = create_block("photodiode", responsivity=1.0, thermal_noise_pa_rthz=20.0, dark_current_na=0.0,
+                               **params)
+            blk.reset(3, "pd")
+            i = blk.process({"in": sig}, None)["out"].data
+            vals.append(10 * np.log10(np.mean(i) ** 2 / np.var(i)))
+        sims[name] = vals
+    save("snr_receivers_sim", sims)
+
+
+@figure
+def fig_vcsel_li():
+    """Static L-I curves of the VCSEL with self-heating at four ambient temperatures (Shi et al., Fig. 1)."""
+    from linkstudio.core.registry import create_block
+    blk = create_block("vcsel")
+    i = np.linspace(0, 30e-3, 121)
+    cols = {"i_ma": i * 1e3}
+    for t0 in (25, 50, 65, 80):
+        p, t = blk.light_current(i, ambient_c=float(t0))
+        cols[f"p{t0}"] = p * 1e3
+        cols[f"t{t0}"] = t
+    save("vcsel_li", cols)
+    from linkstudio.phy.lasers import threshold_current
+    leak, temp = blk.operating_point()
+    with open(OUT / "optical_vcsel.tex", "w") as fh:
+        fh.write(f"\\def\\vcselith{{{threshold_current(blk.re) * 1e3:.2f}}}\n")
+        fh.write(f"\\def\\vcseltemp{{{temp:.0f}}}\n")
+        fh.write(f"\\def\\vcselleak{{{leak * 1e3:.2f}}}\n")
+        h = blk.re
+        fh.write(f"\\def\\vcselhzero{{{h.h0:.3f}}}\\def\\vcselhone{{{h.h1:.3f}}}"
+                 f"\\def\\vcselhtwo{{{h.h2:.3f}}}\\def\\vcselhthree{{{h.h3:.3f}}}\\def\\vcselhd{{{h.diffusion:.2f}}}\n")
+
+
+@figure
+def fig_vcsel_transient():
+    """Square current between 0.5 and 5 mA: secondary pulse from spatial hole burning (Shi et al., Fig. 2)."""
+    from linkstudio.core import Kind, Signal
+    from linkstudio.core.registry import create_block
+    fs = 1e12
+    n = 10000  # 10 ns, two 5 ns periods
+    drive = np.where((np.arange(n) // 2500) % 2 == 0, 1.0, -1.0)[None, :]
+    sig = Signal(drive, Kind.SAMPLES, fs=fs, meta={})
+    cols = {"t_ns": np.arange(n)[::5] / fs * 1e9}
+    zoom = {"t_ns": np.arange(2400, 3400) / fs * 1e9}
+    for name, shb in (("shb", True), ("uniform", False)):
+        blk = create_block("vcsel", bias_ma=2.75, modulation_ma=2.25, spatial_hole_burning=shb, thermal=False,
+                           rin_db_hz=None, parasitic_ghz=None)
+        blk.reset(0, "vcsel")
+        p = np.abs(blk.process({"in": sig}, None)["out"].data[0]) ** 2 * 1e3
+        cols[name] = p[::5]
+        zoom[name] = p[2400:3400]
+    save("vcsel_transient", cols)
+    save("vcsel_turnoff", zoom)
+
+
+@figure
+def fig_laser_response():
+    """Small-signal modulation response of the VCSEL at three bias currents, with simulated points."""
+    from linkstudio.core.registry import create_block
+    from linkstudio.phy.lasers import simulate, small_signal_response
+    blk = create_block("vcsel", thermal=False, parasitic_ghz=None)
+    f = np.linspace(0.05e9, 40e9, 400)
+    cols = {"f": f / 1e9}
+    for ib in (2, 4, 8):
+        cols[f"i{ib}"] = 20 * np.log10(np.abs(small_signal_response(blk.re, ib * 1e-3, f)))
+    save("laser_response", cols)
+    fs, n = 1.6e12, 1 << 14
+    t = np.arange(n) / fs
+    pts = {"f": [], "h": []}
+    bias = 4e-3
+    p0 = None
+    for fk in (2e9, 6e9, 10e9, 14e9, 18e9, 22e9, 28e9, 34e9):
+        fk = round(fk * n / fs) * fs / n
+        p, _ = simulate(blk.re, bias + 0.05e-3 * np.sin(2 * np.pi * fk * t)[None, :], fs, preroll=n // 2)
+        amp = 2 * np.abs(np.mean(p[0] * np.exp(-2j * np.pi * fk * t)))
+        if p0 is None:  # normalize with the static slope dP/dI
+            from linkstudio.phy.lasers import static_power
+            p0 = (static_power(blk.re, bias + 1e-6)[0] - static_power(blk.re, bias - 1e-6)[0]) / 2e-6 * 0.05e-3
+        pts["f"].append(fk / 1e9)
+        pts["h"].append(20 * np.log10(amp / p0))
+    save("laser_response_sim", pts)
+
+
+@figure
+def fig_dml_chirp():
+    """Power and instantaneous frequency of a directly modulated DFB laser (10 Gb/s pattern)."""
+    from linkstudio.core import Kind, Signal
+    from linkstudio.core.registry import create_block
+    fs, sps = 640e9, 64
+    bits = np.array([0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0])
+    drive = np.repeat(2.0 * bits - 1, sps)[None, :]
+    blk = create_block("dml", bias_ma=40.0, modulation_ma=25.0, parasitic_ghz=25.0)
+    blk.reset(0, "dml")
+    y = blk.process({"in": Signal(drive, Kind.SAMPLES, fs=fs, meta={})}, None)["out"].data[0]
+    p = np.abs(y) ** 2
+    freq = np.gradient(np.unwrap(np.angle(y))) * fs / (2 * np.pi)
+    t = np.arange(y.size) / fs * 1e12
+    keep = slice(0, None, 2)
+    save("dml_chirp", {"t_ps": t[keep], "p_mw": p[keep] * 1e3, "f_ghz": freq[keep] / 1e9,
+                       "drive": drive[0][keep]})
+
+
+@figure
+def fig_cd_limit():
+    """Eye-opening penalty of chirp-free IM/DD against L / L_max for three bit rates (noise-free)."""
+    from linkstudio.core import Kind, Signal
+    from linkstudio.core.registry import create_block
+    from linkstudio.phy.dsp.filters import rc_taps
+    rng = np.random.default_rng(1)
+    sps = 16
+    cols = {"x": np.linspace(0.0, 2.0, 21)}
+    for name, rb, order in (("ook10", 10e9, 2), ("ook25", 25e9, 2), ("pam50", 50e9, 4)):
+        nb = int(np.log2(order))
+        rs = rb / nb
+        lmax = theory.cd_limit_km(16.0, rb, nb)
+        levels = rng.integers(0, order, 2048)
+        a = 2 * levels / (order - 1) - 1
+        up = np.zeros(a.size * sps)
+        up[::sps] = a
+        taps = rc_taps(sps, 16, 0.5)
+        drive = np.convolve(up, taps / taps.max(), mode="same")[None, :]
+        sig = Signal(drive, Kind.SAMPLES, fs=rs * sps, meta={})
+        tx = create_block("intensity_modulator", power_dbm=0.0, extinction_ratio_db=15.0)
+        tx.reset(0, "tx")
+        e = tx.process({"in": sig}, None)["out"]
+        def opening(p: np.ndarray) -> float:
+            """Smallest vertical eye opening at the best sampling phase."""
+            best = 0.0
+            for off in range(sps):
+                s = p[off::sps][64:-64]
+                lv = levels[64:-64][: s.size]
+                best = max(best, min(np.min(s[lv == k + 1]) - np.max(s[lv == k]) for k in range(order - 1)))
+            return best
+
+        ref = opening(np.abs(e.data[0]) ** 2)
+        pen = []
+        for x in cols["x"]:
+            fib = create_block("fiber", length_km=float(x * lmax), dispersion_ps_nm_km=16.0, attenuation_db_km=0.0)
+            op = opening(np.abs(fib.process({"in": e}, None)["out"].data[0]) ** 2)
+            pen.append(-10 * np.log10(op / ref) if op > 0 else np.nan)
+        cols[name] = pen
+    save("cd_limit", cols)
+
+
+@figure
+def fig_raman():
+    """Signal power along a 100 km span with a counter-propagating Raman pump (and the link metrics)."""
+    from linkstudio.phy.optical import RamanGain
+    z = np.linspace(0, 100e3, 201)
+    alpha = 0.2 / (10 * np.log10(np.e)) / 1e3
+    cols = {"z": z / 1e3, "passive": -0.2 * z / 1e3}
+    for pump in (300, 600):
+        r = RamanGain(pump * 1e-3, 0.4, 0.25, 100e3)
+        cols[f"p{pump}"] = 10 * np.log10(np.e) * (np.array([r.integral(0.0, zi) for zi in z]) - alpha * z)
+    save("raman_profile", cols)
+    pumps = np.array([0, 100, 200, 300, 400, 500, 600, 700, 800])
+    rows = {"pump": pumps, "osnr": [], "nf": [], "onoff": []}
+    for pump in pumps:
         g = cs.Graph()
         g.create("src", "random_bits", n_bits=512)
         g.create("map", "mapper", scheme="psk", order=4, symbol_rate=32e9)
         g.create("tx", "pulse_shaper", sps=2)
         g.create("mod", "iq_modulator", power_dbm=0.0, linewidth_hz=0.0)
-        g.create("link", "optical_link", n_spans=int(nsp), span_km=80.0, noise_figure_db=5.0)
+        g.create("link", "optical_link", n_spans=10, span_km=100.0, raman_pump_mw=float(pump))
         g.chain("src", "map", "tx", "mod", "link")
-        sim.append(cs.Simulation(g, batch_size=1).run(n_batches=1)["link.osnr_db"])
-    th = 58.0 + 0.0 - 16.0 - 5.0 - 10 * np.log10(spans)
-    save("osnr_spans", {"spans": spans, "sim": sim, "rule58": th})
+        m = cs.Simulation(g, batch_size=1).run(n_batches=1).metrics
+        rows["osnr"].append(m["link.osnr_db"])
+        rows["nf"].append(m.get("link.equivalent_nf_db", 5.0))
+        rows["onoff"].append(m.get("link.raman_on_off_gain_db", 0.0))
+    save("raman_link", rows)
 
 
 @figure
-def fig_ook():
-    from linkstudio.phy.optical import dbm_to_w
-    g = cs.Graph()
-    g.create("src", "random_bits", n_bits=4000)
-    g.create("lc", "line_encoder", symbol_rate=10e9)
-    g.create("tx", "intensity_modulator", power_dbm=-22.0, extinction_ratio_db=10.0)
-    g.create("pd", "photodiode", thermal_noise_pa_rthz=20, shot_noise=False, dark_current_na=0)
-    g.create("agc", "agc")
-    g.create("ld", "line_decoder")
-    g.create("ber", "ber_meter")
-    g.chain("src", "lc", "tx", "pd", "agc", "ld", "ber.rx")
-    g.connect("src", "ber.tx")
-    p = np.arange(-27.0, -18.9, 1.0)
-    sim = sweep_ber(g, "tx.power_dbm", p, max_batches=30)
-    fine = np.linspace(-28, -18, 81)
-    sigma = 20e-12 * np.sqrt(10e9 / 2)
-    th = [float(theory.q_to_ber(theory.ook_q_factor(dbm_to_w(x), 10.0, 0.8, sigma))) for x in fine]
-    save("ook_sim", {"p": p, "ber": sim})
-    save("ook_theory", {"p": fine, "ber": th})
+def fig_coherent_ber():
+    """Back-to-back PM-QPSK and PM-16QAM with ASE noise loading against the constellation SNR."""
+    cols = {}
+    for order, losses in ((4, np.arange(37.0, 44.1, 1.0)), (16, np.arange(31.0, 38.1, 1.0))):  # SNR = 48.9 dB - loss
+        snr, ber = [], []
+        for loss in losses:
+            g = cs.Graph()
+            g.create("src", "random_bits", n_bits=16000 if order == 16 else 8000)
+            g.create("map", "mapper", scheme="psk" if order == 4 else "qam", order=order, symbol_rate=32e9)
+            g.create("dmx", "stream_demux", n_streams=2)
+            g.create("tx", "pulse_shaper", sps=4, rolloff=0.1, span=32)
+            g.create("mod", "iq_modulator", power_dbm=0.0, linewidth_hz=0.0)
+            g.create("att", "optical_attenuator", loss_db=float(loss))
+            g.create("amp", "optical_amplifier", mode="gain", gain_db=30.0, noise_figure_db=5.0)
+            g.create("rx", "coherent_receiver", lo_linewidth_hz=0.0, shot_noise=False, thermal_noise_pa_rthz=0.0)
+            g.create("mf", "matched_filter")
+            g.create("agc", "agc", remove_dc=False)
+            g.create("mux", "stream_mux")
+            g.create("demap", "demapper", method="hard")
+            g.create("ber", "ber_meter")
+            g.chain("src", "map", "dmx", "tx", "mod", "att", "amp", "rx", "mf", "agc", "mux", "demap", "ber.rx")
+            g.connect("src", "ber.tx")
+            res = cs.Simulation(g, batch_size=8, seed=7).run(
+                stop=cs.StopCriteria.errors("ber.bit_errors", 300, max_batches=30))
+            snr.append(res["amp.osnr_rs_db"])
+            ber.append(res["ber.ber"] if res["ber.bit_errors"] >= 10 else np.nan)
+        cols[f"snr{order}"], cols[f"ber{order}"] = snr, ber
+    save("coherent_ber_sim", cols)
+    fine = np.linspace(4, 22, 91)
+    save("coherent_ber_theory", {"snr": fine,
+                                 "bpsk": theory.ber_pm_qam(2, fine), "qpsk": theory.ber_pm_qam(4, fine),
+                                 "qam8": theory.ber_pm_qam(8, fine), "qam16": theory.ber_pm_qam(16, fine),
+                                 "qam64": theory.ber_pm_qam(64, fine),
+                                 "qpsk_exact": theory.ber_qam_esn0(4, fine), "qam16_exact": theory.ber_qam_esn0(16, fine)})
+
+
+@figure
+def fig_gn_launch():
+    """Received SNR of the centre channel against the launch power: split-step simulation and GN model."""
+    from linkstudio.phy.optical import ase_psd, beta2
+    sc = cs.load_scenario(BACKEND / "scenarios" / "optical" / "wdm_nonlinear.yaml")
+    g = sc.graph
+    powers = np.arange(-4.0, 6.1, 1.0)
+    sim = []
+    for pw in powers:
+        g.set_param("mod.power_dbm", float(pw))
+        res = cs.Simulation(g, batch_size=2, seed=1).run(n_batches=1)
+        sim.append(res["evm.mer_db"])
+    rs, nch, df = 32e9, 5, 50e9
+    eta = theory.gn_eta(1.3, 0.2, beta2(17.0, 1550.0) * 1e27, rs, 80.0, nch, df)
+    p_ase = 2 * ase_psd(10 ** 1.6, 5.0, 1550.0) * rs
+    fine = np.linspace(-6, 8, 141)
+    pw = 1e-3 * 10 ** (fine / 10)
+    save("gn_launch_sim", {"p": powers, "mer": sim})
+    save("gn_launch_theory", {"p": fine, "gsnr": theory.gsnr_db(pw, 10, p_ase, eta),
+                              "osnr": 10 * np.log10(pw / (10 * p_ase)),
+                              "nli": 10 * np.log10(pw / (10 * eta * pw ** 3))})
+    with open(OUT / "optical_gn.tex", "w") as fh:
+        fh.write(f"\\def\\gnpopt{{{10 * np.log10(theory.gn_optimum_power(p_ase, eta) / 1e-3):.1f}}}\n")
+        fh.write(f"\\def\\gneta{{{eta:.0f}}}\n")
 
 
 @figure
@@ -818,8 +1109,8 @@ SNIPPETS: list[tuple[str, str, str | None, str | None]] = [
     ("waterfill", "linkstudio.phy.wireline.waterfill_bits", r"gamma = ", None),
     ("dmt_hermitian", "linkstudio.phy.wireline.DMTModulator.process", r"X = np.zeros", r"out = np.concatenate"),
     ("jitter", "linkstudio.phy.wireline.Jitter.process", r"n_sym = ", r"t = n\["),
-    ("wiener", "linkstudio.phy.optical._wiener_phase", None, None),
-    ("im_mod", "linkstudio.phy.optical.IntensityModulator.process", r"drive = ", r"field = "),
+    ("wiener", "linkstudio.phy.optical.wiener_phase", r"if linewidth", None),
+    ("im_mod", "linkstudio.phy.optical.IntensityModulator.process", r"er = 10", r"field = "),
     ("iq_mzm", "linkstudio.phy.optical.IQModulator.process", r"if p.model", r"field = d /"),
     ("disp_op", "linkstudio.phy.optical.dispersion_operator", None, None),
     ("beta2", "linkstudio.phy.optical.beta2", None, None),
@@ -828,9 +1119,9 @@ SNIPPETS: list[tuple[str, str, str | None, str | None]] = [
     ("ase", "linkstudio.phy.optical.ase_psd", None, None),
     ("add_ase", "linkstudio.phy.optical._add_ase", None, None),
     ("osnr", "linkstudio.phy.optical.osnr_db", None, None),
-    ("link_loop", "linkstudio.phy.optical.OpticalLink.process", r"g = 10", r"ase = ase"),
-    ("photodiode", "linkstudio.phy.optical.Photodiode.process", r"M = p.apd_gain", r"current = "),
-    ("coherent_rx", "linkstudio.phy.optical.CoherentReceiver.process", r"walk = ", r"out = scale"),
+    ("link_loop", "linkstudio.phy.optical.OpticalLink.process", r"for _ in range", r"power = power"),
+    ("photodiode", "linkstudio.phy.optical.Photodiode.process", r"M, F = ", r"current = M"),
+    ("coherent_rx", "linkstudio.phy.optical.CoherentReceiver.process", r"walk = ", r"noise = np.sqrt"),
     ("cd_comp", "linkstudio.phy.optical.CDCompensation.process", r"H = np.conj", r"y = np.fft"),
     ("fo_est", "linkstudio.phy.optical.FOCompensation.process", r"nfft = ", r"rot = "),
     ("butterfly", "linkstudio.phy.optical.AdaptiveMIMOEqualizer.process", r"for k in range\(n_sym", r"W \+= mu"),
@@ -846,7 +1137,22 @@ SNIPPETS: list[tuple[str, str, str | None, str | None]] = [
     ("mmf_launch", "linkstudio.phy.multimode.gaussian_launch_weights", r"xi = np.linspace", None),
     ("mmf_response", "linkstudio.phy.multimode.MultimodeFiber.response", r"p = self.params", None),
     ("mmf_default_alpha", "linkstudio.phy.multimode.MultimodeFiber.profile_alpha", r"p = self.params", None),
-    ("vcsel_response", "linkstudio.phy.optical.laser_response", r"h = resonance", None),
+    ("laser_rhs", "linkstudio.phy.lasers._rhs", r"s = np.exp", None),
+    ("laser_steady", "linkstudio.phy.lasers._carriers", r"g = re.g0", None),
+    ("laser_small_signal", "linkstudio.phy.lasers.small_signal_response", r"n0, n1, s = ", None),
+    ("laser_overlap", "linkstudio.phy.lasers.overlap_coefficients", r"R, Rm = ", None),
+    ("vcsel_thermal", "linkstudio.phy.lasers.thermal_operating_point", r"i = np.atleast_1d", None),
+    ("vcsel_vi", "linkstudio.phy.lasers.ThermalModel.voltage", r"i, t = ", None),
+    ("laser_block", "linkstudio.phy.lasers._LaserBlock.process", r"current = p.bias_ma", r"phase = phase"),
+    ("mzm_field", "linkstudio.phy.optical.mzm_field", r"d = 0.0", None),
+    ("mzm_block", "linkstudio.phy.optical.MachZehnderModulator.process", r"bias, swing = ", r"field = e_in"),
+    ("raman", "linkstudio.phy.optical.RamanGain.ase_psd", r"alpha = ", None),
+    ("amp_sat", "linkstudio.phy.optical.saturated_gain", r"if p_in_w", None),
+    ("link_gn", "linkstudio.phy.optical.OpticalLink.process", r"wdm = x.meta", r"\"gn_optimum_launch_dbm\""),
+    ("gn_eta", "linkstudio.phy.theory.gn_eta", r"alpha = ", None),
+    ("osnr_link", "linkstudio.phy.theory.osnr_link_db", r"a = 10", None),
+    ("pam_ser", "linkstudio.phy.theory.pam_imdd_ser", r"er = 10", None),
+    ("coh_isnr", "linkstudio.phy.optical.CoherentReceiver.process", r"if p.hybrid_phase_error_deg", r"var \+= sig_power"),
     ("delay_kernel", "linkstudio.phy.channel.fading.delay_kernel", r"whole = ", None),
     ("tr38901", "linkstudio.phy.channel.propagation.tr38901_path_loss_db", r"d2d = ", None),
     ("dielectric", "linkstudio.phy.wireline.dielectric_response", r"if loss_db_m_hz == 0", None),
@@ -874,6 +1180,7 @@ def generate_snippets() -> None:
     meta = ["% Generated by manual/tools/generate.py: \\snipdef{name}{file}{first line}{last line}\n"]
     for name, dotted, start, end in SNIPPETS:
         obj = inspect.unwrap(_resolve(dotted))
+        obj = getattr(obj, "py_func", obj)  # numba-compiled functions keep the Python source
         lines, first = inspect.getsourcelines(obj)
         a, b = 0, len(lines) - 1
         if start is not None:

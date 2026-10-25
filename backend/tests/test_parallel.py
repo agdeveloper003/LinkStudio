@@ -93,7 +93,7 @@ def test_fiber_response_group_delay_is_dispersion():
     # tau(f) = -beta2 L w: slope -2 pi beta2 L (envelope convention of dispersion_operator)
     from linkstudio.phy.optical import beta2
 
-    b2l = beta2(fib.params.dispersion_ps_nm_km * fib.params.length_km, 1550.0) * 1e3
+    b2l = beta2(fib.params.dispersion_ps_nm_km * fib.params.length_km, sc.graph["mod"].params.wavelength_nm) * 1e3
     slope = np.polyfit(f, gd, 1)[0]
     assert slope == pytest.approx(-2 * np.pi * b2l, rel=1e-3)
     assert np.allclose(res["magnitude_db"], -fib.params.attenuation_db_km * fib.params.length_km, atol=1e-6)

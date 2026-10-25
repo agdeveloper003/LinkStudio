@@ -58,14 +58,19 @@ Fiber loss, metadata & $P\,e^{-\alpha L}$, $D\ell$ & \file{test_wireline_optical
 Dispersion & Gaussian broadening; exact compensation & \file{test_wireline_optical.py}, \cref{fig:dispersion}\\
 SPM & CW phase $\gamma PL_{\mathrm{eff}}$ & \file{test_wireline_optical.py}, \cref{fig:spm}\\
 Split-step solver & second-order convergence on the soliton & \cref{fig:soliton}\\
-EDFA & OSNR formula & \file{test_wireline_optical.py}, \cref{fig:osnr}\\
-IM/DD OOK & Q-factor BER & \file{test_wireline_optical.py}, \cref{fig:ook}\\
+EDFA, multi-span link & OSNR formulas ($n_{sp}=F/2$, $GA\ne1$, course exercise), saturation & \file{test_optical_models.py}, \cref{fig:osnr-spans,fig:osnr-span-length}\\
+Raman & on/off gain, lumped-limit ASE, $F_{\mathrm{eq}}<3$\,dB & \file{test_optical_models.py}, \cref{fig:raman}\\
+GN model & long-span form, 3\,dB rule, link metrics; split-step comparison & \file{test_optical_models.py}, \cref{fig:gn-launch}\\
+Lasers & threshold and slope, settling, linearized response, adiabatic chirp, VCSEL overlaps, thermal rollover, hole-burning turn-off & \file{test_lasers.py}, \cref{fig:vcsel-li,fig:vcsel-transient,fig:laser-response}\\
+Modulators, detectors & MZM sine law and ER, PAM levels, TIA output, APD power law, ISNR & \file{test_optical_models.py}, \cref{fig:snr-receivers}\\
+PM-QAM & course BER formulas vs exact; back-to-back simulation & \file{test_optical_models.py}, \cref{fig:coherent-ber}\\
+IM/DD OOK, PAM-4 & Q-factor BER; PAM-M formula of the course; dispersion limit & \file{test_wireline_optical.py}, \file{test_optical_models.py}, \cref{fig:pam-imdd,fig:cd-limit}\\
 IM/DD PAM-4 & dispersion-induced power fading & \file{test_wireline_optical.py}\\
 Coherent DP-QPSK & BER vs OSNR theory within $\approx0.3$\,dB; FO estimate & \file{test_wireline_optical.py}\\
 FSO & mean and variance of the scintillation & \file{test_wireline_optical.py}, \cref{fig:fso}\\
 WDM & XPM lowers the MER of the centre channel & \file{test_wireline_optical.py}\\
 Multimode fiber & $\alpha_{\mathrm{opt}}$, $\sigma_{\min}$, WKB delay, continuum limit, class bandwidths, launch closed forms, variance additivity & \file{test_multimode.py}, \cref{fig:mmf-profile,fig:mmf-launch}\\
-VCSEL, receiver & 3-dB bandwidth limit, ER, power; Bessel--Thomson noise bandwidth; data-center reach & \file{test_multimode.py}, \cref{fig:mmf-eyes}\\
+Data-center lane & Bessel--Thomson noise bandwidth; reach by fiber class & \file{test_multimode.py}, \cref{fig:mmf-eyes}\\
 Fading generator & Zheng--Xiao: $R_h=J_0$, uncorrelated I/Q & \file{test_channels.py}, \cref{fig:jakes}\\
 NR TDL profiles & unit normalized delay spread; TDL-D $K_1=13.3$\,dB; fractional delay & \file{test_channels.py}\\
 Path loss & P.525; TR~38.901 breakpoint continuity, NLOS $\ge$ LOS, shadowing, LOS probability & \file{test_propagation.py}, \cref{fig:pathloss}\\

@@ -1,4 +1,4 @@
-"""Multimode fiber and VCSEL: checks against the closed-form theory."""
+"""Multimode fiber: checks against the closed-form theory, and the VCSEL data-center lane."""
 
 import numpy as np
 import pytest
@@ -9,7 +9,7 @@ import linkstudio as cs
 from linkstudio.core import Kind, Signal
 from linkstudio.phy.multimode import (
     GAUSS_BW_RMS, chromatic_rms_ps_per_km, gaussian_launch_weights, group_delay,
-    optimum_alpha, overfilled_rms, profile_contrast, vcsel_bandwidth_hz, vcsel_response,
+    optimum_alpha, overfilled_rms, profile_contrast,
 )
 
 DELTA = profile_contrast(0.2, 1.467)
@@ -105,31 +105,6 @@ def test_pulse_variance_adds_modal_and_chromatic_variances(model):
     expected = np.sqrt(10.0 ** 2 + m["modal_rms_ps"] ** 2 + m["chromatic_rms_ps"] ** 2) * 1e-12
     assert rms_width(p_out, t) == pytest.approx(expected, rel=0.02)
     assert p_out.sum() / (np.abs(sig.data[0]) ** 2).sum() == pytest.approx(10 ** (-3.5 * 0.3 / 10), rel=1e-6)
-
-
-def test_vcsel_response_and_bandwidth():
-    f = np.array([0.0])
-    assert vcsel_response(f, 20e9, 1e11, 20e9)[0] == pytest.approx(1.0)
-    bw = vcsel_bandwidth_hz(20e9, 1e11, None)
-    assert np.abs(vcsel_response(np.array([bw]), 20e9, 1e11, None))[0] ** 2 == pytest.approx(0.5)
-    # Weak damping: the 3-dB bandwidth tends to sqrt(1 + sqrt(2)) f_r.
-    assert vcsel_bandwidth_hz(20e9, 1e9, None) == pytest.approx(np.sqrt(1 + np.sqrt(2)) * 20e9, rel=1e-3)
-
-
-def test_vcsel_power_and_extinction_ratio():
-    g = cs.Graph()
-    g.create("src", "random_bits", n_bits=2000)
-    g.create("map", "mapper", scheme="pam", order=2, symbol_rate=1e9)
-    g.create("tx", "pulse_shaper", shape="rect", sps=16)
-    g.create("laser", "vcsel", power_dbm=-3.0, extinction_ratio_db=4.0, rin_db_hz=None)
-    g.chain("src", "map", "tx", "laser")
-    out = cs.Simulation(g, batch_size=2, seed=0).run(n_batches=1, capture="*").captures["laser.out"]
-    power = np.abs(out.data) ** 2
-    assert np.mean(power) == pytest.approx(10 ** (-0.3) * 1e-3, rel=0.02)
-    mean = np.mean(power)  # slow drive: the medians of the two levels are the settled values
-    hi, lo = np.median(power[power > mean]), np.median(power[power < mean])
-    assert 10 * np.log10(hi / lo) == pytest.approx(4.0, abs=0.1)
-    assert out.meta["spectral_width_nm"] == 0.4
 
 
 def test_photodiode_bandwidth_scales_reported_noise():

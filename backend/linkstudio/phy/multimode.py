@@ -1,4 +1,4 @@
-"""Short-reach optics: VCSEL transmitters and graded-index multimode fiber (data-center links).
+"""Short-reach optics: graded-index multimode fiber for VCSEL data-center links.
 
 A VCSEL launches light into hundreds of fiber modes and has a spectrum hundreds of GHz
 wide, so the modes add in power, not in field. The multimode fiber is therefore a
@@ -24,8 +24,8 @@ from pydantic import Field
 from scipy.optimize import brentq
 
 from linkstudio.core import Block, BlockError, BlockParams, Kind, Port, RunContext, Signal, register_block
-from linkstudio.phy.dsp.filters import apply_frequency_response, dc_group_delay
-from linkstudio.phy.optical import C_LIGHT, dbm_to_w, intensity_noise, laser_response
+from linkstudio.phy.dsp.filters import apply_frequency_response
+from linkstudio.phy.optical import C_LIGHT
 
 # Gaussian impulse response: 3-dB optical bandwidth B and RMS width sigma obey B * sigma = sqrt(ln 2 / 2) / pi.
 GAUSS_BW_RMS = np.sqrt(np.log(2) / 2) / np.pi  # 0.1874, the "0.187" of the IEEE 802.3 link model
@@ -278,67 +278,3 @@ class MultimodeFiber(Block):
         total = np.hypot(m["modal_rms_ps"], m["chromatic_rms_ps"])
         m["bandwidth_ghz"] = GAUSS_BW_RMS / (total * 1e-12) / 1e9 if total > 0 else float("inf")
         return m
-
-
-# ---------------------------------------------------------------------- VCSEL
-vcsel_response = laser_response  # the VCSEL uses the generic small-signal laser response
-
-
-@register_block("vcsel", category="optical")
-class VCSEL(Block):
-    """Directly modulated 850 nm VCSEL for multimode data-center links.
-
-    The real drive (NRZ, PAM-4...) is normalized to [-1, 1], filtered by the small-signal
-    laser response and mapped to optical power P = P_avg (1 + m x) with modulation depth
-    m = (ER - 1) / (ER + 1); power below threshold is clipped to zero. Relative intensity
-    noise is added, and the RMS spectral width is published as ``spectral_width_nm`` for
-    the chromatic dispersion of a ``multimode_fiber``. The group delay of the laser
-    response is added to the ``delay`` metadata so that receivers sample at the eye centre.
-    """
-
-    class Params(BlockParams):
-        power_dbm: float = Field(0.0, description="Average optical power.")
-        extinction_ratio_db: float = Field(4.0, gt=0)
-        resonance_ghz: float = Field(20.0, gt=0, description="Relaxation-oscillation frequency f_r.")
-        damping_per_ns: float = Field(100.0, gt=0, description="Damping rate gamma (1/ns).")
-        parasitic_ghz: float | None = Field(20.0, gt=0, description="Parasitic RC pole (None = ideal chip).")
-        rin_db_hz: float | None = Field(-140.0, description="Relative intensity noise.")
-        wavelength_nm: float = Field(850.0, gt=0)
-        spectral_width_nm: float = Field(0.4, ge=0, description="RMS spectral width (multimode VCSEL).")
-
-    inputs = {"in": Port(Kind.SYMBOLS | Kind.SAMPLES)}
-    outputs = {"out": Port(Kind.SAMPLES, doc="Optical field (sqrt(W)).")}
-
-    def response(self, f: np.ndarray) -> np.ndarray:
-        p = self.params
-        return vcsel_response(f, p.resonance_ghz * 1e9, p.damping_per_ns * 1e9,
-                              p.parasitic_ghz * 1e9 if p.parasitic_ghz else None)
-
-    def frequency_response(self, f: np.ndarray, x: Signal) -> np.ndarray:
-        """Small-signal modulation response (drive current to optical power)."""
-        return self.response(f)
-
-    def process(self, inputs: dict[str, Signal], ctx: RunContext) -> dict[str, Signal]:
-        x = inputs["in"]
-        p = self.params
-        if not x.fs:
-            raise BlockError("vcsel needs the sample rate (fs) of the signal.")
-        drive = np.real(x.data)
-        drive = drive / (np.max(np.abs(drive)) or 1.0)
-        drive = apply_frequency_response(drive, self.response, x.fs, pad=256)
-        er = 10 ** (p.extinction_ratio_db / 10)
-        p_avg = dbm_to_w(p.power_dbm)
-        power = p_avg * (1 + (er - 1) / (er + 1) * drive)
-        power = np.maximum(intensity_noise(self.rng, power, p_avg, p.rin_db_hz, x.fs), 0.0)
-        meta = {**x.meta, "optical": True, "wavelength_nm": p.wavelength_nm, "power": p_avg,
-                "spectral_width_nm": p.spectral_width_nm, "cd_ps_nm": 0.0, "ase_psd": 0.0, "unit": "√W",
-                "delay": x.meta.get("delay", 0.0) + dc_group_delay(self.response, x.fs) * x.fs}
-        return {"out": Signal(np.sqrt(power).astype(np.complex128), Kind.SAMPLES, fs=x.fs, meta=meta)}
-
-
-def vcsel_bandwidth_hz(resonance_hz: float, damping_per_s: float, parasitic_hz: float | None) -> float:
-    """3-dB modulation bandwidth of :func:`vcsel_response` (|H|^2 = 1/2), found numerically."""
-    def g(f: float) -> float:
-        return float(np.abs(vcsel_response(np.array([f]), resonance_hz, damping_per_s, parasitic_hz))[0] ** 2) - 0.5
-    return brentq(g, 1.0, 10 * resonance_hz)
-

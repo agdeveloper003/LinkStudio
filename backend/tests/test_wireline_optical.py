@@ -482,20 +482,6 @@ def test_coherent_receiver_splits_lo_between_polarizations():
     assert np.allclose(np.abs(y.data), np.sqrt(5e-3) * np.sqrt(0.5e-3))
 
 
-def test_adiabatic_chirp_shifts_frequency_with_power():
-    from linkstudio.core import Kind, Signal
-    fs, n = 100e9, 4000
-    drive = np.where(np.arange(n) < n // 2, -1.0, 1.0)[None, :]
-    sig = Signal(drive, Kind.SAMPLES, fs=fs, meta={})
-    tx = cs.create_block("intensity_modulator", power_dbm=0.0, extinction_ratio_db=10.0, adiabatic_chirp_ghz_mw=2.0)
-    tx.reset(0, "tx")
-    e = tx.process({"in": sig}, None)["out"].data[0]
-    freq = np.diff(np.unwrap(np.angle(e))) * fs / (2 * np.pi)
-    p1, p0 = 2e-3 / (1 + 0.1), 2e-3 / (1 + 10)  # levels for ER = 10 dB around 1 mW
-    assert np.median(freq[n // 2 + 10:]) - np.median(freq[:n // 2 - 10]) == pytest.approx(2e9 * (p1 - p0) / 1e-3,
-                                                                                          rel=1e-3)
-
-
 def test_gamma_gamma_parameters_from_rytov_variance():
     from linkstudio.phy.optical import gamma_gamma_parameters, rytov_variance
     a, b = gamma_gamma_parameters(1.0)

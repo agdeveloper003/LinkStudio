@@ -1,25 +1,41 @@
-\chapter{Optical communications}\label{ch:optical}
+\chapter{Optical fiber communications}\label{ch:optical}
 
-\file{phy/optical.py} models fiber-optic and free-space optical links, from the laser to the
-coherent receiver's digital signal processing. \Cref{fig:optical-chains} shows the two families
-of systems it supports.
+This chapter develops the theory behind the optical blocks and shows, block by block, how the
+simulator implements it. The treatment follows the two parts of the optical fiber
+communications course on which the models are based~\cite{ofcnotes}: intensity modulation with
+direct detection (IM/DD) for short and medium reach, and coherent dual-polarization systems
+with optical amplification for long haul. The VCSEL follows the rate-equation model of Shi,
+Qi, Wang and Hu~\cite{shi2009}. Wherever possible the figures compare the simulated blocks
+with the closed-form results they are meant to reproduce.
+
+The code is in four modules: \file{phy/optical.py} (fiber, modulators, amplifiers, detectors,
+coherent DSP, free space), \file{phy/lasers.py} (rate-equation lasers), \file{phy/multimode.py}
+(multimode fiber) and \file{phy/theory.py} (closed-form references). \Cref{fig:optical-chains}
+shows the three families of links they support.
 
 \begin{figure}[htbp]
 \centering
-\begin{tikzpicture}[node distance=3mm and 3.6mm,every node/.style={font=\sffamily\scriptsize}]
+\begin{tikzpicture}[node distance=3mm and 3.4mm,every node/.style={font=\sffamily\scriptsize}]
   \node[lbl,anchor=east] at (-0.15,0) {IM/DD};
-  \node[blockbox,minimum width=10mm] (a1) at (0.55,0) {PAM/NRZ};
-  \node[blockbox,right=of a1,minimum width=10mm] (a2) {laser /\\EML};
-  \node[warmbox,right=of a2,minimum width=10mm] (a3) {fiber};
-  \node[warmbox,right=of a3,minimum width=10mm] (a4) {EDFA};
-  \node[greenbox,right=of a4,minimum width=10mm] (a5) {PIN /\\APD};
-  \node[greenbox,right=of a5,minimum width=10mm] (a6) {AGC};
+  \node[blockbox,minimum width=10mm] (a1) at (0.55,0) {PAM-M};
+  \node[blockbox,right=of a1,minimum width=12mm] (a2) {DML / MZM\\IM};
+  \node[warmbox,right=of a2,minimum width=10mm] (a3) {SMF};
+  \node[warmbox,right=of a3,minimum width=10mm] (a4) {VOA};
+  \node[greenbox,right=of a4,minimum width=12mm] (a5) {PIN / APD\\+ TIA};
+  \node[greenbox,right=of a5,minimum width=10mm] (a6) {EQ / AGC};
   \node[greenbox,right=of a6,minimum width=10mm] (a7) {decision};
   \foreach \x/\y in {a1/a2,a2/a3,a3/a4,a4/a5,a5/a6,a6/a7} \draw[sig] (\x)--(\y);
-  \node[lbl,anchor=east] at (-0.15,-1.35) {coherent};
-  \node[blockbox,minimum width=10mm] (b1) at (0.55,-1.35) {DP-QAM};
-  \node[blockbox,right=of b1,minimum width=10mm] (b2) {IQ-MZM};
-  \node[warmbox,right=of b2,minimum width=12mm] (b3) {$N\times$(span\\+EDFA)};
+  \node[lbl,anchor=east] at (-0.15,-1.35) {short reach};
+  \node[blockbox,minimum width=10mm] (c1) at (0.55,-1.35) {NRZ};
+  \node[blockbox,right=of c1,minimum width=12mm] (c2) {VCSEL\\850 nm};
+  \node[warmbox,right=of c2,minimum width=12mm] (c3) {MMF\\OM3/OM4};
+  \node[greenbox,right=of c3,minimum width=12mm] (c4) {PIN + TIA\\$0.75R_s$};
+  \node[greenbox,right=of c4,minimum width=10mm] (c5) {decision};
+  \foreach \x/\y in {c1/c2,c2/c3,c3/c4,c4/c5} \draw[sig] (\x)--(\y);
+  \node[lbl,anchor=east] at (-0.15,-2.7) {coherent};
+  \node[blockbox,minimum width=10mm] (b1) at (0.55,-2.7) {PM-QAM};
+  \node[blockbox,right=of b1,minimum width=10mm] (b2) {IQ-MZM\\$\times2$};
+  \node[warmbox,right=of b2,minimum width=14mm] (b3) {$M\times$(span\\+ Raman + EDFA)};
   \node[greenbox,right=of b3,minimum width=10mm] (b4) {coherent\\front end};
   \node[greenbox,right=of b4,minimum width=8mm] (b5) {CD};
   \node[greenbox,right=of b5,minimum width=8mm] (b6) {FO};
@@ -27,156 +43,269 @@ of systems it supports.
   \node[greenbox,right=of b7,minimum width=8mm] (b8) {CPR};
   \foreach \x/\y in {b1/b2,b2/b3,b3/b4,b4/b5,b5/b6,b6/b7,b7/b8} \draw[sig] (\x)--(\y);
 \end{tikzpicture}
-\caption{Intensity modulation with direct detection, and dual-polarization coherent transmission.}
+\caption{The three families of optical links: IM/DD over single-mode fiber, VCSEL links over
+multimode fiber inside data centers, and coherent dual-polarization transmission over amplified
+long-haul links.}
 \label{fig:optical-chains}
 \end{figure}
 
 \begin{incode}
-Optical signals are complex field envelopes around the optical carrier, scaled so that
-$|E|^2$ is the instantaneous optical power in watts. Dual polarization uses the shape
-$(B,2,n)$. Optical blocks maintain the following metadata:
+Optical signals are complex field envelopes scaled so that $|E|^2$ is the instantaneous optical
+power in watts. A single polarization has the shape $(B,n)$ and dual polarization $(B,2,n)$.
+Optical blocks keep the following metadata up to date:
 \begin{itemize}
-  \item \meta{wavelength_nm};
-  \item \meta{power}, the average launch or received power in W;
-  \item \meta{cd_ps_nm}, the accumulated chromatic dispersion $D\ell$;
-  \item \meta{ase_psd}, the accumulated ASE density per polarization in W/Hz.
+  \item \meta{wavelength_nm}, the carrier wavelength;
+  \item \meta{power}, the average power in W (launch, after loss, after gain);
+  \item \meta{cd_ps_nm} and \meta{cd_slope_ps_nm2}, the accumulated dispersion $D\ell$ and slope $S\ell$;
+  \item \meta{ase_psd}, the accumulated ASE density per polarization in W/Hz;
+  \item \meta{unit}, $\sqrt{\mathrm W}$ for optical fields.
 \end{itemize}
-The OSNR is computed from the last two at any point of the link.
+The OSNR can therefore be computed at any point of a link from \meta{power} and
+\meta{ase_psd}, without measuring the noise.
 \end{incode}
 
 % ==================================================================
-\section{Transmitters}
-\subsection{Directly modulated lasers}
-An intensity modulator maps the electrical drive $x\in[-1,1]$ to the optical power
+\section{Signals, power and noise}\label{sec:opt-signals}
+\subsection{Bandpass signals, analytic signal and complex envelope}
+An optical field is a bandpass signal around the laser frequency $f_0\approx193$\,THz:
 \begin{equation}
-  P(t)=P_{\mathrm{avg}}\big(1+m\,x(t)\big),\qquad m=\frac{\mathrm{ER}-1}{\mathrm{ER}+1},
+  E_{rb}(t)=a(t)\cos\big(2\pi f_0t+\phi_0(t)\big).
 \end{equation}
-since the extinction ratio is $\mathrm{ER}=P_1/P_0=(1+m)/(1-m)$. Three non-idealities are
-modelled:
+In amplitude modulation (on--off keying, PAM) only $a(t)$ carries information and the spectrum
+is the baseband spectrum of $a(t)$ shifted to $\pm f_0$,
+$E(f)=\frac12[A(f-f_0)+A(f+f_0)]$. Phase modulation varies $\phi_0(t)$; a spurious frequency
+modulation $\Delta f(t)$ of the transmitter, $E=a\cos(2\pi(f_0+\Delta f(t))t+\phi_0)$, is called
+\emph{chirp}. For a real signal $|E(f)|$ is even and $\arg E(f)$ odd, so the negative frequencies
+carry no extra information. Two complex representations remove them:
 \begin{itemize}
-  \item \textbf{Relative intensity noise}: additive Gaussian noise on $P$ with variance
-  $\mathrm{RIN}\cdot P_{\mathrm{avg}}^2\cdot f_s/2$. As in the IEEE~802.3 link model \cite{cunningham2002}, RIN is
-  referred to the average power.
-  \item \textbf{Phase noise}: a Wiener process with the laser linewidth (\cref{eq:wiener}).
-  \item \textbf{Transient chirp} of a directly modulated laser. The instantaneous frequency
-  follows the power changes, $\Delta\nu(t)=\frac{\alpha}{4\pi}\frac{d}{dt}\ln P(t)$, with $\alpha$
-  the Henry linewidth-enhancement factor. Integrating gives the phase
-  \begin{equation}
-    \phi_{\mathrm{chirp}}(t)=\frac{\alpha}{2}\ln\frac{P(t)}{P_{\mathrm{avg}}} .
-  \end{equation}
+  \item the \emph{analytic signal} $E_a(t)=a(t)e^{j\phi_0(t)}e^{j2\pi f_0t}$, with $E_{rb}=\Re\{E_a\}$;
+  \item the \emph{complex envelope} $\tilde E(t)=a(t)e^{j\phi_0(t)}=E_R(t)+jE_I(t)$, with
+  $E_{rb}=\Re\{\tilde Ee^{j2\pi f_0t}\}$.
 \end{itemize}
-The field is $E=\sqrt P\,e^{j\phi}$.
-
-Two further effects of a directly modulated laser come from the rate equations
-\cite{koch1984,coldren2012}.
-\begin{itemize}
-  \item \textbf{Adiabatic chirp.} The complete chirp is
-  $\Delta\nu=\frac{\alpha}{4\pi}\big(\frac{d}{dt}\ln P+\kappa P\big)$. The second, adiabatic term
-  is a frequency offset proportional to the power. It dominates the frequency excursion of DMLs
-  and turns into intensity distortion after dispersive fiber. The block takes
-  $\kappa_{\mathrm{ad}}=\alpha\kappa/(4\pi)$ in GHz/mW (\prm{adiabatic_chirp_ghz_mw}). It
-  integrates $2\pi\kappa_{\mathrm{ad}}\!\int(P-P_{\mathrm{avg}})\,dt$ into the phase, so the carrier
-  is defined at the average power. A test checks that a power step from $P_0$ to $P_1$ moves the
-  instantaneous frequency by $\kappa_{\mathrm{ad}}(P_1-P_0)$.
-  \item \textbf{Modulation bandwidth.} With \prm{resonance_ghz} set, the drive passes through the
-  small-signal laser response of \cref{sec:mmf} (relaxation resonance, damping, parasitic pole),
-  and its group delay is added to the \code{delay} metadata.
-\end{itemize}
-\codeexcerpt{im_mod}{Laser intensity modulation with bandwidth, RIN, phase noise and chirp (\blk{intensity_modulator}).}
-
-\begin{pitfall}[Small-signal, not large-signal]
-The laser dynamics are linearized: the bandwidth is the small-signal response around the bias,
-and the chirp follows the Koch--Bowers relation. Large-signal effects of the full rate equations
-(gain compression at high modulation depth, turn-on delay near threshold) and thermal effects
-are not included.
-\end{pitfall}
-
-\subsection{Mach--Zehnder and IQ modulators}
-A Mach--Zehnder modulator in push--pull configuration, biased at null, has the field transfer
-function $E_{\mathrm{out}}/E_{\mathrm{in}}=\sin\big(\frac{\pi}{2}V/V_\pi\big)$. An IQ modulator
-nests two of them, with a $90^\circ$ phase shift between the arms:
+The spectrum of $\tilde E$ is the positive-frequency part of $E(f)$ moved to $f=0$; it is not
+symmetric, because $\tilde E$ is complex. The real signal has power $P_{rb}=\frac12\overline{a^2}$, the analytic
+signal and the envelope $P_a=P_{ce}=\overline{a^2}=2P_{rb}$. Following the convention of optical
+communications the envelope is normalized so that
 \begin{equation}
-  \frac{E_{\mathrm{out}}}{E_{\mathrm{in}}}\propto\sin\Big(\frac\pi2\frac{V_I}{V_\pi}\Big)+j\sin\Big(\frac\pi2\frac{V_Q}{V_\pi}\Big).
+  P(t)=|\tilde E(t)|^2\quad[\mathrm W],
 \end{equation}
-With the peak drive set to \prm{drive_swing}$\times V_\pi$, small swings are nearly linear,
-while large swings compress the outer constellation points (\cref{fig:mzm}). The \prm{linear}
-model maps the drive directly onto the field. The laser power is split equally between the
-polarizations.
+which corresponds to the physical field $\Re\{\sqrt2\,\tilde E(t)e^{j2\pi f_0t}\}$. The tilde is dropped from
+now on, and $\bar P$ denotes the time average (for OOK with equiprobable bits and $P_0=0$,
+$\bar P=P_{\mathrm{peak}}/2$).
 
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}
-\begin{axis}[width=9cm,height=5cm,xlabel={drive $V/V_\pi$},ylabel={normalized output},xmin=-1,xmax=1,
-  ymin=-1.1,ymax=1.1,legend pos=north west,samples=101]
-  \addplot[th=accent,domain=-1:1] {sin(90*x)};
-  \addplot[th=accent2,domain=-1:1] {sin(90*x)^2};
-  \addplot[th=black!50,dashed,domain=-0.6:0.6] {pi/2*x};
-  \draw[accent3,fill=accent3!15,opacity=0.5] (axis cs:-0.5,-1.1) rectangle (axis cs:0.5,1.1);
-  \legend{field $\sin(\frac\pi2 V/V_\pi)$,power,linear approx.}
-\end{axis}
-\end{tikzpicture}
-\caption{MZM transfer function at null bias. The shaded region is the default drive swing
-($0.5\,V_\pi$).}
-\label{fig:mzm}
-\end{figure}
-\codeexcerpt{iq_mzm}{Sinusoidal MZM transfer and power normalization (\blk{iq_modulator}).}
+\paragraph{Bandwidth.} A real baseband signal of bandwidth $B$ (for example a 10\,Gb/s NRZ drive,
+$B\approx10$\,GHz to the first null) produces a bandpass optical signal of bandwidth $2B$ around $f_0$
+and a complex envelope of bandwidth $B$ around $0$ (two-sided $2B$). The usual digital signal is
+$x(t)=x_{\mathrm{bias}}+\sum_k\alpha_ks(t-kT_s)$, whose power spectral density is
+\begin{equation}
+  G_x(f)=x_{\mathrm{bias}}^2\delta(f)+\frac{\sigma_\alpha^2}{T_s}|S(f)|^2 .
+\end{equation}
+Rectangular NRZ pulses give a $\sinc^2$ with first null at the symbol rate $D=1/T_s$; Nyquist
+pulses reach the minimum bandwidth $D/2$; raised-cosine pulses with roll-off $\rho$ occupy
+$\frac D2(1+\rho)$. QAM modulates the in-phase and quadrature components with two PAM streams,
+$\tilde E=a(t)+jb(t)$, doubling the bit rate for the same symbol rate.
+
+\paragraph{Frequency and wavelength.} With $f=c/\lambda$, a small band transforms as
+\begin{equation}
+  |\Delta f|=\frac{c}{\lambda^2}|\Delta\lambda|,
+\end{equation}
+so 100\,GHz is 0.8\,nm at 1550\,nm and 0.57\,nm at 1310\,nm. \Cref{tab:bands} lists the optical
+bands.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Telecommunication wavelength bands of silica fiber.}
+\label{tab:bands}
+\begin{tabularx}{\textwidth}{@{}lllX@{}}
+\toprule
+band & range [nm] & frequency [THz] & use\\
+\midrule
+first window & 850 & 353 & VCSELs and LEDs over multimode fiber\\
+O (original) & 1260--1360 & 238--220 & zero dispersion of G.652 fiber; DMLs, data centers, access\\
+E (extended) & 1360--1460 & 220--205 & water-peak region (low-water-peak fibers)\\
+S (short) & 1460--1530 & 205--196 & emerging amplifiers\\
+C (conventional) & 1530--1565 & 196.1--191.7 & lowest loss, EDFAs, long-haul WDM\\
+L (long) & 1565--1625 & 191.7--184.5 & second EDFA band\\
+U (ultra-long) & 1625--1675 & 184.5--179.0 & monitoring\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Power levels.} Ratios are given in dB, $G_{\mathrm{dB}}=10\log_{10}(P_1/P_2)$, and absolute
+powers in dBm, $P_{\mathrm{dBm}}=10\log_{10}(P/1\,\mathrm{mW})$, so cascades add:
+$P_{\mathrm{out,dBm}}=P_{\mathrm{in,dBm}}+G_{\mathrm{dB}}-A_{\mathrm{dB}}$.
+
+\subsection{White Gaussian noise}
+A white Gaussian process of power spectral density $N_0/2$ filtered by $H(f)$ has density
+$\frac{N_0}2|H(f)|^2$ and power
+\begin{equation}
+  P_{n}=\frac{N_0}{2}\int_{-\infty}^{\infty}|H(f)|^2df,
+\end{equation}
+which is $N_0B$ for an ideal rectangular filter of (one-sided) bandwidth $B$. In the simulator
+the noise of a block is generated over the whole simulated band $f_s$ and filtered by the
+downstream blocks, so the result does not depend on the sample rate.
+
+\subsection{Polarization and the four quadratures}
+A single-mode fiber guides two degenerate modes with the same transverse profile and orthogonal
+polarizations. The field is therefore a vector,
+\begin{equation}
+  \vect E(z,t)=\big(E_{Ix}+jE_{Qx}\big)\hat x+\big(E_{Iy}+jE_{Qy}\big)\hat y,
+  \qquad P(z,t)=|E_x|^2+|E_y|^2,
+\end{equation}
+with four real degrees of freedom, the \emph{quadratures}. The reference polarizations may be
+linear, circular or elliptical; birefringence rotates them randomly along the fiber and in time
+(minutes in buried cables, milliseconds with vibrations, tens of microseconds on aerial cables),
+but it preserves orthogonality and power. Direct-detection systems modulate and detect only
+$P(t)$ and are insensitive to polarization; coherent systems modulate and detect all four
+quadratures.
 
 % ==================================================================
-\section{Propagation in single-mode fiber}\label{sec:nlse}
-\subsection{The nonlinear Schrödinger equation}
-The slowly varying envelope $A(z,t)$ of a single-mode fiber, in a frame moving with the group
-velocity, obeys
+\section{The optical fiber}\label{sec:fiber}
+\subsection{Structure and modes}
+A fiber is a strand of pure silica 125\,\textmu m in diameter. The core has a slightly higher
+refractive index than the cladding (by about 0.35\,\%, with germanium doping), and light is
+confined by total internal reflection. Solving Maxwell's equations, the field is a sum of guided
+modes,
 \begin{equation}
-  \frac{\partial A}{\partial z}=
-  \underbrace{-\frac{\alpha}{2}A-j\frac{\beta_2}{2}\frac{\partial^2A}{\partial t^2}}_{\hat D A}
-  \;+\;\underbrace{j\gamma|A|^2A}_{\hat N A},
-  \label{eq:nlse}
+  E(\vect r,z,t)=\sum_{i=1}^{N_{\mathrm{modes}}}E_i(z,t)\,\mathcal E_i(\vect r),
 \end{equation}
-with three ingredients~\cite{agrawal2019}:
+each with its own transverse profile $\mathcal E_i(\vect r)$ and its own propagation constant. A
+step-index core guides a single mode (two polarizations) when
+\begin{equation}
+  V=\frac{2\pi a}{\lambda}\,\mathrm{NA}=\frac{2\pi a}{\lambda}\sqrt{n_{\mathrm{core}}^2-n_{\mathrm{clad}}^2}<2.405,
+\end{equation}
+which at 1310--1550\,nm needs a core diameter of about 10\,\textmu m. The fundamental LP$_{01}$ mode
+has an approximately Gaussian intensity profile. Multimode fibers (50 or 62.5\,\textmu m cores) guide
+hundreds of modes travelling at different speeds; they are used with VCSELs inside data
+centers (\cref{sec:mmf}). For single-mode fiber the transverse profile is omitted and $E(z,t)$ is
+normalized so that $|E(z,t)|^2$ is the power crossing the fiber section.
+
+\subsection{Attenuation}
+Absorption and scattering make the field decay as $E(z)=E(0)e^{-\alpha_Ez}$, the power as
+$P(z)=P(0)e^{-2\alpha_Ez}=P(0)e^{-\alpha z}$. In decibels the loss is linear in distance,
+\begin{equation}
+  A_{\mathrm{dB}}=10\log_{10}\frac{P(0)}{P(z)}=\alpha_{\mathrm{dB}}z,\qquad
+  \alpha_{\mathrm{dB}}=20\log_{10}(e)\,\alpha_E=8.686\,\alpha_E=4.343\,\alpha,
+\end{equation}
+and the link equation of every power budget is
+\begin{equation}
+  P_{Rx,\mathrm{dBm}}=P_{Tx,\mathrm{dBm}}-\alpha_{\mathrm{dB}}L .
+\end{equation}
+The intrinsic loss of glass combines Rayleigh scattering ($\propto\lambda^{-4}$) at short
+wavelengths and infrared vibrational absorption at long wavelengths, plus impurity peaks (the
+water peak near 1383\,nm). The minimum, about 0.2\,dB/km (0.17\,dB/km for pure-silica-core fiber,
+below 0.18\,dB/km for the best commercial fibers), lies in the C band, where erbium amplifiers
+also work. The C band spans 35\,nm, about 4.4\,THz. Across one channel (tens of GHz) the
+attenuation is constant: it scales the signal without distorting it. Across a WDM comb it
+varies by a few hundredths of a dB/km.
+
+\begin{keypoint}
+Throughout the manual $\alpha$ without subscript is the \emph{power} attenuation coefficient
+(the NLSE convention); the field coefficient is $\alpha_E=\alpha/2$. Block parameters are in
+dB/km. The GN model of \cref{sec:gn} is written with the field coefficient, as in the
+literature.
+\end{keypoint}
+
+\subsection{Chromatic dispersion}\label{sec:cd}
+The propagation constant $\beta$ depends on frequency, polarization and power. Its frequency
+dependence is expanded around the carrier $\omega_0=2\pi f_0$ ($\Delta\omega=\omega-\omega_0$):
+\begin{equation}
+  \beta(\omega)=\beta_0+\beta_1\Delta\omega+\frac12\beta_2\Delta\omega^2+\frac16\beta_3\Delta\omega^3+\dots,
+  \qquad E_{\mathrm{out}}(z,\omega)=E_{\mathrm{in}}(\omega)e^{-j\beta(\omega)z}e^{-\alpha_Ez}.
+\end{equation}
+The terms have distinct effects:
 \begin{itemize}
-  \item the power attenuation $\alpha$, given in dB/km as \prm{attenuation_db_km};
-  \item the group-velocity dispersion $\beta_2$, related to the dispersion parameter $D$
-  (ps/nm/km) by
-  \begin{equation}
-    \beta_2=-\frac{D\lambda^2}{2\pi c}\qquad(\beta_2\approx\SI{-21.7}{ps^2/km}\ \text{for }D=17,\ \lambda=1550\,\mathrm{nm});
-  \end{equation}
-  \item the Kerr coefficient $\gamma$, given in 1/W/km as \prm{gamma_w_km}.
+  \item $e^{-j\beta_0z}$ is a constant phase, irrelevant;
+  \item $e^{-j\beta_1\Delta\omega z}$ is a linear phase, a delay $t_D=\beta_1z$ (group velocity $v_g=1/\beta_1$),
+  which does not distort;
+  \item $e^{-j\frac12\beta_2\Delta\omega^2z}$ is quadratic in frequency and distorts: it is
+  \emph{chromatic dispersion} (CD).
 \end{itemize}
-For wide WDM grids, or near the zero-dispersion wavelength, the third-order term
-$\frac{\beta_3}{6}\partial_t^3A$ is added, with
-$\beta_3=\big(\frac{\lambda}{2\pi c}\big)^2(\lambda^2S+2\lambda D)$ from the dispersion slope $S$
-(\prm{dispersion_slope_ps_nm2_km}; about 0.057\,ps/nm$^2$/km for G.652 fiber at 1550\,nm~\cite{g652}).
-It is 0 by default, giving the textbook NLSE.
-With the Fourier convention of \cref{eq:fourier-convention}, $\partial_t\to j\omega$, so the
-linear part has the exact solution
+A distortion-free channel needs $|H(f)|$ constant and $\arg H(f)$ linear on the signal band.
+Dispersion is an all-pass filter with quadratic phase,
 \begin{equation}
-  \tilde A(z,\omega)=\tilde A(0,\omega)\exp\!\Big(j\frac{\beta_2}{2}\omega^2z-\frac{\alpha}{2}z\Big),
-  \label{eq:dispersion-operator}
+  H_F(f)=e^{-j2\pi^2\beta_2(f-f_0)^2z},\qquad |H_F|=1 .
+  \label{eq:hf}
 \end{equation}
-an all-pass filter with quadratic phase. The dispersion therefore depends only on the
-accumulated $D\ell$ (ps/nm), the quantity tracked in \meta{cd_ps_nm}.
+The group delay of a phase-only filter is $\tau_g=-\frac{1}{2\pi}\frac{d\phi}{df}$; for
+\cref{eq:hf}
+\begin{equation}
+  \tau_g(f)=2\pi\beta_2(f-f_0)z,\qquad \frac{d\tau_g}{df}=2\pi\beta_2z,
+\end{equation}
+so two spectral components $\Delta f$ apart arrive $\Delta\tau_g=2\pi\beta_2\Delta f\,z$ apart:
+different colours travel at different speeds. Fiber datasheets give instead the dispersion
+parameter $D$, defined from the delay per unit wavelength,
+$\tau_g(\lambda)=\tau_g(\lambda_0)+D(\lambda-\lambda_0)z$, so that
+\begin{equation}
+  \Delta\tau_g=D\,\Delta\lambda\,z,\qquad
+  D\Big[\tfrac{\mathrm{ps}}{\mathrm{nm\cdot km}}\Big]=-\frac{2\pi c}{\lambda^2}\,\beta_2\Big[\tfrac{\mathrm{ps}^2}{\mathrm{km}}\Big]
+  \approx-0.784\,\beta_2\quad(\lambda=1550\,\mathrm{nm}).
+\end{equation}
+$D$ and $\beta_2$ have opposite signs; standard fiber has $D\approx+16$--$17$\,ps/(nm\,km)
+($\beta_2\approx-21$\,ps$^2$/km) at 1550\,nm and $D=0$ near 1310\,nm. Total dispersion is the sum of
+material dispersion (the index of glass varies with $\lambda$) and waveguide dispersion (the
+confinement varies with $\lambda/a$); special index profiles shift it (\cref{tab:fibers}).
 
-\paragraph{Sign convention.} The envelope follows Agrawal's convention, in which the carrier is
-$e^{-j\omega_0t}$. The dispersion, nonlinear and LO phases all use this convention consistently,
-so solitons, SPM, CD compensation and frequency offsets behave correctly. With NumPy's transform,
-however, a \emph{positive} baseband frequency is a \emph{lower} optical frequency (a longer
-wavelength). This matters for odd-order terms. With slope, the operator is
-$\exp\!\big(j(\tfrac{\beta_2}{2}\omega^2-\tfrac{\beta_3}{6}\omega^3)\ell\big)$ on the NumPy grid, which
-gives the group delay $\tau=D\ell\,\Delta\lambda+\tfrac{S\ell}{2}\Delta\lambda^2$; the test suite
-checks this to within 0.05\,ps. It also matters when WDM channel indices are mapped onto the
-G.694.1 grid. The accumulated slope is tracked in \meta{cd_slope_ps_nm2}, and
-\blk{cd_compensation} removes it together with $D\ell$.
+\paragraph{Example.} A 10\,Gb/s chirp-free NRZ signal has its main spectral content within
+$\Delta f\approx R_B=10$\,GHz, that is $\Delta\lambda=0.08$\,nm. After 200\,km of standard fiber
+$\Delta\tau=16\times200\times0.08=256$\,ps, 2.6 bit slots: the pulses overlap completely. In a
+coherent system at 100\,GBd with roll-off 0.3, $\Delta f=130$\,GHz, and 1000\,km
+($\beta_2L=-21\,000$\,ps$^2$) spread each pulse over $2\pi\cdot130\,\mathrm{GHz}\cdot21\,000\,\mathrm{ps^2}\approx17\,000$\,ps, 1700 symbols.
+
+\paragraph{Accumulated dispersion.} The field is linear in the fiber, so cascaded segments
+multiply their transfer functions:
+$H_{F,\mathrm{tot}}=e^{-j2\pi^2(f-f_0)^2\sum_i\beta_{2,i}L_i}$. Only the accumulated dispersion
+\begin{equation}
+  D_{\mathrm{acc}}=\sum_mD_mL_m\ [\mathrm{ps/nm}],\qquad \beta_{2,\mathrm{acc}}=\sum_m\beta_{2,m}L_m
+\end{equation}
+matters, also across optical amplifiers. Dispersion-compensating fiber ($D<0$) can bring
+$D_{\mathrm{acc}}$ back to zero; coherent receivers compensate it digitally instead.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Fiber types at 1550\,nm, available as \prm{fiber_type} of \blk{fiber} and
+\blk{optical_link} (the slope stays a separate parameter).}
+\label{tab:fibers}
+\begin{tabular}{@{}llccc@{}}
+\toprule
+\prm{fiber_type} & fiber & $\alpha_{\mathrm{dB}}$ [dB/km] & $D$ [ps/(nm\,km)] & $\gamma$ [1/(W\,km)]\\
+\midrule
+\code{smf} & standard single mode, ITU-T G.652 & 0.20 & 16 & 1.3\\
+\code{nzdsf} & non-zero dispersion shifted, G.655 & 0.21 & 4 & 2.0\\
+\code{pscf} & pure silica core & 0.17 & 21 & 0.8\\
+\code{dcf} & dispersion compensating & 0.45 & $-100$ & 4.0\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Third-order dispersion.} For wide WDM grids, or near the zero-dispersion wavelength,
+the term $\frac{\beta_3}6\Delta\omega^3$ matters, with
+$\beta_3=\big(\frac{\lambda}{2\pi c}\big)^2(\lambda^2S+2\lambda D)$ from the dispersion slope $S$
+(\prm{dispersion_slope_ps_nm2_km}; about 0.057\,ps/(nm$^2$\,km) for G.652 fiber~\cite{g652}). It is 0
+by default.
+
+\paragraph{Sign convention.} The simulator follows Agrawal's convention, in which the carrier
+is $e^{-j\omega_0t}$ and the linear operator reads $\exp\!\big(j\frac{\beta_2}{2}\omega^2z-\frac\alpha2z\big)$.
+The course writes the carrier as $e^{+j\omega_0t}$, which conjugates every phase:
+\cref{eq:hf} and the NLSE of \cref{sec:nlse} are the same physics. The dispersion, nonlinear and LO
+phases use one convention consistently, so solitons, SPM, CD compensation and frequency offsets
+behave correctly. With NumPy's transform a \emph{positive} baseband frequency is then a
+\emph{lower} optical frequency, which matters for odd-order terms: with slope, the operator is
+$\exp\!\big(j(\tfrac{\beta_2}{2}\omega^2-\tfrac{\beta_3}{6}\omega^3)\ell\big)$ on the NumPy grid and gives
+the group delay $\tau=D\ell\,\Delta\lambda+\tfrac{S\ell}{2}\Delta\lambda^2$, which the test suite checks to
+0.05\,ps. The accumulated slope is tracked in \meta{cd_slope_ps_nm2} and removed by
+\blk{cd_compensation} together with $D\ell$.
 \codeexcerpt{beta2}{From $D$ to $\beta_2$.}
-\codeexcerpt{disp_op}{The dispersion operator of \cref{eq:dispersion-operator}.}
+\codeexcerpt{disp_op}{The dispersion operator.}
 
-\paragraph{Dispersion alone.}
-An unchirped Gaussian pulse $A(0,t)=e^{-t^2/(2T_0^2)}$ stays Gaussian and broadens as
+\paragraph{Gaussian pulse.} An unchirped Gaussian pulse $A(0,t)=e^{-t^2/(2T_0^2)}$ stays Gaussian
+and broadens as
 \begin{equation}
   \frac{T_1(z)}{T_0}=\sqrt{1+\Big(\frac{z}{L_D}\Big)^2},\qquad L_D=\frac{T_0^2}{|\beta_2|}.
 \end{equation}
-For $T_0=5$\,ps and $|\beta_2|=\fiberbeta$\,ps$^2$/km, $L_D=\fiberLD$\,km.
-\Cref{fig:dispersion} compares the \code{propagate} solver with this result. The simulated RMS
-widths agree with the formula to all printed digits, as expected from an exact spectral method.
+For $T_0=5$\,ps and $|\beta_2|=\fiberbeta$\,ps$^2$/km, $L_D=\fiberLD$\,km. \Cref{fig:dispersion}
+compares the solver with this result; the RMS widths agree to all printed digits, as expected
+from an exact spectral method.
 
 \begin{figure}[htbp]
 \centering
@@ -201,12 +330,73 @@ widths agree with the formula to all printed digits, as expected from an exact s
 \label{fig:dispersion}
 \end{figure}
 
-\paragraph{Kerr nonlinearity alone.}
-Without dispersion \cref{eq:nlse} integrates exactly. The power profile is unchanged and the phase
-grows in proportion to it, $A(L,t)=A(0,t)\,e^{-\alpha L/2}e^{j\gamma|A(0,t)|^2L_{\mathrm{eff}}}$ with
-$L_{\mathrm{eff}}=(1-e^{-\alpha L})/\alpha$. This self-phase modulation (SPM) chirps the pulse and
-broadens its spectrum, with a number of spectral peaks that grows with the peak phase
-$\phi_{\max}=\gamma P_0L_{\mathrm{eff}}$ (\cref{fig:spm}).
+\subsection{Polarization-mode dispersion}
+Random birefringence rotates the state of polarization and delays the two principal states by
+the differential group delay (DGD). Because the birefringence changes along the length, the DGD
+is a random variable: Maxwellian, with mean $\langle\tau\rangle=D_{\mathrm{PMD}}\sqrt\ell$, and frequency
+dependent (higher-order PMD). LinkStudio uses the coarse-step \emph{waveplate}
+model~\cite{marcuse1997}: a span is a cascade of $N$ birefringent sections (\prm{pmd_sections}, 10
+by default), each a fixed DGD $\delta\tau$ between Haar-random rotations,
+\begin{equation}
+  \mat T(\omega)=\mat U_{N+1}\prod_{k=N}^{1}\begin{pmatrix}e^{j\omega\delta\tau/2}&0\\0&e^{-j\omega\delta\tau/2}\end{pmatrix}\mat U_k,
+  \qquad \delta\tau=\langle\tau\rangle\sqrt{\frac{3\pi}{8N}} .
+\end{equation}
+The total DGD then satisfies $\langle\tau^2\rangle=N\delta\tau^2$, and the Maxwellian relation
+$\langle\tau^2\rangle=\frac{3\pi}{8}\langle\tau\rangle^2$ fixes $\delta\tau$. The rotations come from a QR
+decomposition of a complex Gaussian matrix with the phases of the diagonal of $\mat R$ removed.
+The test suite extracts the DGD of 4000 fibers from the eigenvalues of $j\,\mat T'\mat T^\dagger$; the mean is
+within 1\,\% of $D_{\mathrm{PMD}}\sqrt\ell$ and $\langle\tau^2\rangle/\langle\tau\rangle^2=1.168$ against $3\pi/8=1.178$
+(\cref{fig:pmd}).
+\codeexcerpt{pmd_transfer}{Jones matrices of the waveplate PMD model.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=10cm,height=5.2cm,xlabel={DGD $\tau/\langle\tau\rangle$},ylabel={pdf},xmin=0,xmax=3,ymin=0,
+  legend pos=north east]
+  \addplot[th=accent] table[x=x,y=maxwell]{\datafile{pmd_dgd}};
+  \addplot[sim=accent2,mark size=1.2pt] table[x=x,y=hist]{\datafile{pmd_dgd}};
+  \legend{Maxwellian,{waveplate model, $N=10$}}
+\end{axis}
+\end{tikzpicture}
+\caption{DGD distribution of 20\,000 fibers built by \code{pmd_transfer} against the Maxwellian
+density $\frac{32\tau^2}{\pi^2\langle\tau\rangle^3}e^{-4\tau^2/(\pi\langle\tau\rangle^2)}$.}
+\label{fig:pmd}
+\end{figure}
+
+\subsection{Kerr nonlinearity and the nonlinear Schrödinger equation}\label{sec:nlse}
+The refractive index of silica grows with the intensity (Kerr effect), so the propagation
+constant depends on the instantaneous power. The complex envelope obeys the nonlinear
+Schrödinger equation (NLSE). In the course convention~\cite{ofcnotes},
+\begin{equation}
+  \frac{\partial E}{\partial z}=j\frac{\beta_2}{2}\frac{\partial^2E}{\partial t^2}-\frac{\alpha}{2}E-j\gamma|E|^2E,
+\end{equation}
+and in Agrawal's convention, used by the code~\cite{agrawal2019},
+\begin{equation}
+  \frac{\partial A}{\partial z}=
+  \underbrace{-\frac{\alpha}{2}A-j\frac{\beta_2}{2}\frac{\partial^2A}{\partial t^2}}_{\hat D A}
+  \;+\;\underbrace{j\gamma|A|^2A}_{\hat N A},
+  \label{eq:nlse}
+\end{equation}
+with power attenuation $\alpha$, group-velocity dispersion $\beta_2$ and Kerr coefficient $\gamma$
+(\prm{gamma_w_km}, about 1.3\,W$^{-1}$km$^{-1}$ for standard fiber). The two are complex conjugates of each
+other. The linear part has the exact solution
+\begin{equation}
+  \tilde A(z,\omega)=\tilde A(0,\omega)\exp\!\Big(j\frac{\beta_2}{2}\omega^2z-\frac{\alpha}{2}z\Big),
+  \label{eq:dispersion-operator}
+\end{equation}
+which depends only on the accumulated $D\ell$ tracked in \meta{cd_ps_nm}.
+
+\paragraph{Self-phase modulation.} Without dispersion and loss, \cref{eq:nlse} gives
+$A(z,t)=A(0,t)e^{j\gamma P(0,t)z}$: the power modulates its own phase. With loss the power decays as
+$P(0,t)e^{-\alpha z}$ and the accumulated phase is
+\begin{equation}
+  \phi_{\mathrm{NL}}(t)=\gamma P(0,t)\int_0^ze^{-\alpha z'}dz'=\gamma P(0,t)L_{\mathrm{eff}},\qquad
+  L_{\mathrm{eff}}=\frac{1-e^{-\alpha z}}{\alpha},
+\end{equation}
+so the nonlinearity acts over an effective length shorter than $z$, tending to $1/\alpha\approx21.7$\,km
+for long spans. SPM chirps the pulse and broadens its spectrum, with a number of peaks that grows
+with the peak phase $\phi_{\max}=\gamma P_0L_{\mathrm{eff}}$ (\cref{fig:spm}).
 
 \begin{figure}[htbp]
 \centering
@@ -221,29 +411,25 @@ $\phi_{\max}=\gamma P_0L_{\mathrm{eff}}$ (\cref{fig:spm}).
   \addplot[th=accent2] table[x=f,y=p35]{\datafile{spm_spectra}};
 \end{groupplot}
 \end{tikzpicture}
-\caption{SPM-broadened spectra of a Gaussian pulse computed by \code{propagate} with $D=0$,
-the classic figure of Agrawal~\cite{agrawal2019}: $\phi_{\max}=(M-\frac12)\pi$ produces $M$ peaks.}
+\caption{SPM-broadened spectra of a Gaussian pulse computed by \code{propagate} with $D=0$, the
+classic figure of Agrawal~\cite{agrawal2019}: $\phi_{\max}=(M-\frac12)\pi$ produces $M$ peaks.}
 \label{fig:spm}
 \end{figure}
 
-\subsection{The split-step Fourier method}
-With both terms present, \cref{eq:nlse} has no general closed form. Formally
-$A(z+h)=e^{h(\hat D+\hat N)}A(z)$. The two operators do not commute, but each is trivial to
-apply on its own: $\hat D$ is a multiplication in the frequency domain, and $\hat N$ a
-multiplication in the time domain. The symmetric (Strang) splitting
+\paragraph{The split-step Fourier method.} With both terms present, \cref{eq:nlse} has no
+general closed form. Formally $A(z+h)=e^{h(\hat D+\hat N)}A(z)$; the two operators do not commute,
+but each is trivial on its own: $\hat D$ is a multiplication in the frequency domain, $\hat N$ in
+the time domain. The symmetric (Strang) splitting
 \begin{equation}
   A(z+h)=e^{\frac h2\hat D}\,e^{h\hat N}\,e^{\frac h2\hat D}A(z)+\mathcal O(h^3)
   \label{eq:strang}
 \end{equation}
-is exact to second order, by the Baker--Campbell--Hausdorff formula: the first commutator
-$[\hat D,\hat N]$ cancels by symmetry. Over a fixed length the $L/h$ local errors add up to a
-global error $\mathcal O(h^2)$.
-
-Attenuation is included in the half steps. The nonlinear phase is applied at mid-step to the
-field whose power has been reduced by the first half step. The effective length that makes
-this exact for a constant envelope is
+is exact to second order, by the Baker--Campbell--Hausdorff formula (the first commutator cancels
+by symmetry); over a fixed length the global error is $\mathcal O(h^2)$. Attenuation and any
+distributed gain enter the half steps. The nonlinear phase is applied at mid-step with the
+effective length of the local net loss $a=\alpha-g$,
 \begin{equation}
-  L_{\mathrm{eff}}(h)=\int_{-h/2}^{h/2}e^{-\alpha z'}dz'=\frac{2\sinh(\alpha h/2)}{\alpha} .
+  L_{\mathrm{eff}}(h)=\int_{-h/2}^{h/2}e^{-az'}dz'=\frac{2\sinh(ah/2)}{a} .
 \end{equation}
 For dual polarization the Manakov equation replaces $|A|^2$ by $|A_x|^2+|A_y|^2$ and $\gamma$ by
 $\frac89\gamma$, the average over fast random polarization evolution.
@@ -267,226 +453,889 @@ $\frac89\gamma$, the average over fast random polarization evolution.
   \legend{input / exact,dispersion only,NLSE (split-step)}
 \end{groupplot}
 \end{tikzpicture}
-\caption{Validation of the solver on the fundamental soliton, an exact solution of
-\cref{eq:nlse} with $\alpha=0$. With $T_0=5$\,ps, $P_0=|\beta_2|/(\gamma T_0^2)=\solitonPzero$\,W
-and $L=\solitonL$\,km $=4L_D$, the pulse must return unchanged. Left: the relative $L^2$ error
-falls as $h^2$, confirming the order of \cref{eq:strang}. Right: dispersion alone would broaden
-the pulse, while the balance with SPM preserves it.}
+\caption{Validation of the solver on the fundamental soliton, an exact solution of \cref{eq:nlse}
+with $\alpha=0$. With $T_0=5$\,ps, $P_0=|\beta_2|/(\gamma T_0^2)=\solitonPzero$\,W and
+$L=\solitonL$\,km $=4L_D$, the pulse must return unchanged. Left: the relative $L^2$ error falls as
+$h^2$, confirming the order of \cref{eq:strang}. Right: dispersion alone would broaden the pulse,
+while the balance with SPM preserves it.}
 \label{fig:soliton}
 \end{figure}
 
-\paragraph{Choosing the step.} A fixed step that suits 0\,dBm per channel, where the nonlinear
+\paragraph{Choosing the step.} A fixed step suited to 0\,dBm per channel, where the nonlinear
 length $1/(\gamma P)$ is hundreds of km, is far too long for the 28\,dBm soliton of
-\cref{fig:soliton}, whose nonlinear length is about 1\,km. A fixed 2\,km step leaves a 12\,\% error
+\cref{fig:soliton}, whose nonlinear length is about 1\,km; a fixed 2\,km step leaves a 12\,\% error
 there. The solver therefore uses the nonlinear-phase-rotation criterion of Sinkin et
-al.~\cite{sinkin2003}. Each step is limited so that the peak nonlinear phase
-$\gamma P_{\mathrm{peak}}L_{\mathrm{eff}}$ stays below \prm{nonlinear_phase_rad} (0.05\,rad by
-default), and never exceeds $1/$\prm{steps_per_km}. The step lengthens automatically as the power
-decays along the span. With the defaults the soliton error falls to $3\times10^{-4}$, while
-typical WDM links keep 1--2\,km steps. Without \prm{nonlinear} the solver applies one exact FFT
-for the whole span.
+al.~\cite{sinkin2003}: each step is limited so that the peak nonlinear phase
+$\gamma P_{\mathrm{peak}}L_{\mathrm{eff}}$ stays below \prm{nonlinear_phase_rad} (0.05\,rad by default), and never
+exceeds $1/$\prm{steps_per_km}. The step lengthens automatically as the power decays. With the
+defaults the soliton error falls to $3\times10^{-4}$, while WDM links keep 1--2\,km steps. Without
+\prm{nonlinear} the solver applies one exact FFT for the whole span.
 
-\subsection{Polarization-mode dispersion}
-Random birefringence rotates the state of polarization and delays the two principal states by
-the differential group delay (DGD). In a real fiber the birefringence changes along the length,
-so the DGD is a random variable. It is Maxwellian distributed with mean
-$\langle\tau\rangle=D_{\mathrm{PMD}}\sqrt\ell$, and it varies with frequency (higher-order PMD).
-LinkStudio uses the coarse-step \emph{waveplate} model~\cite{marcuse1997}. A span is a cascade of
-$N$ birefringent sections (\prm{pmd_sections}, 10 by default), each a fixed DGD $\delta\tau$
-between Haar-random rotations:
+% ==================================================================
+\section{Semiconductor lasers}\label{sec:lasers}
+\subsection{Absorption, stimulated and spontaneous emission}
+Lasers, photodiodes and amplifiers are quantum systems with (at least) two energy levels.
+Three processes occur, with probabilities that depend on the conditions:
+\begin{itemize}
+  \item \textbf{absorption}: a photon of energy $hf=E_2-E_1$ lifts a carrier to the upper
+  level and disappears (the principle of photodiodes);
+  \item \textbf{stimulated emission}: a photon makes an excited carrier drop and creates a second
+  photon with the same frequency, phase, polarization and direction, coherently amplifying the
+  field (the principle of lasers and amplifiers); it dominates absorption only with a population
+  inversion, obtained by pumping;
+  \item \textbf{spontaneous emission}: an excited carrier drops by itself and emits a photon with
+  random phase and direction, the source of optical noise.
+\end{itemize}
+In a semiconductor laser a forward current injects carriers into the active region of a p-n
+junction; spontaneous emission starts the process, stimulated emission amplifies it, and the
+optical feedback of the cavity (cleaved facets, a distributed Bragg grating in DFB and DBR lasers,
+an external filter in ECLs) acts as a narrow filter $|H(f)|^2$ on the broad gain spectrum, so that
+emission occurs at a single frequency $f_c$. Fabry--Perot lasers, with several longitudinal modes,
+are not used for high-quality links.
+
+\subsection{The CW spectrum: relative intensity noise and phase noise}
+Ideally a laser in continuous-wave (CW) operation emits $E(t)=a\,e^{j\phi_0}$, a line at $f_0$. Real
+lasers have
 \begin{equation}
-  \mat T(\omega)=\mat U_{N+1}\prod_{k=N}^{1}\begin{pmatrix}e^{j\omega\delta\tau/2}&0\\0&e^{-j\omega\delta\tau/2}\end{pmatrix}\mat U_k,
-  \qquad \delta\tau=\langle\tau\rangle\sqrt{\frac{3\pi}{8N}} .
+  E(t)=\big(a+n_{\mathrm{RIN}}(t)\big)e^{j\phi_0(t)},
 \end{equation}
-The total DGD then satisfies $\langle\tau^2\rangle=N\delta\tau^2$, and the Maxwellian relation
-$\langle\tau^2\rangle=\frac{3\pi}{8}\langle\tau\rangle^2$ fixes $\delta\tau$. The rotations come from a QR
-decomposition of a complex Gaussian matrix, with the phases of the diagonal of $\mat R$ removed.
-The test suite extracts the DGD of 4000 fibers from the Jones matrix,
-$\tau=\lambda_1-\lambda_2$ with $\lambda_i$ the eigenvalues of $j\,\mat T'\mat T^\dagger$. It finds the
-mean within 1\,\% of $D_{\mathrm{PMD}}\sqrt\ell$ and $\langle\tau^2\rangle/\langle\tau\rangle^2=1.168$
-against $3\pi/8=1.178$ (\cref{fig:pmd}).
-\codeexcerpt{pmd_transfer}{Jones matrices of the waveplate PMD model.}
+with relative intensity noise (RIN) on the amplitude and phase noise on the phase. In good
+lasers the line shape is dominated by phase noise and specified by its full width at half
+maximum, the \emph{linewidth} $\Delta\nu$. The simplest model makes the instantaneous frequency a
+white Gaussian process, so the phase is a Wiener process (\cref{eq:wiener}),
+\begin{equation}
+  \phi_k=\phi_{k-1}+\N\Big(0,\frac{2\pi\Delta\nu}{f_s}\Big),
+\end{equation}
+which produces a Lorentzian spectrum; an additional $1/f$ (flicker) frequency noise would make
+it Gaussian. Typical values: DFB lasers 10--20\,dBm with linewidths of a few MHz, external-cavity
+lasers 100--300\,kHz (below 100\,kHz for coherent transceivers, $\delta f/f_0\approx10^{-9}$), special
+lasers for metrology and quantum communications 1--10\,Hz. RIN is the power noise referred to the
+average power, $\sigma_P^2=\mathrm{RIN}\cdot\bar P^2\cdot B$; the blocks add it as Gaussian noise over
+the simulated bandwidth $f_s/2$, as in the IEEE~802.3 link model~\cite{cunningham2002}.
+\codeexcerpt{wiener}{Wiener phase noise of a laser of linewidth $\Delta\nu$.}
+\codeexcerpt{rin}{Relative intensity noise referred to the average power.}
+
+\subsection{The rate equations}
+A single-mode laser is described by the number $N$ of carriers in the active region, the number
+$S$ of photons in the lasing mode and the optical phase $\phi$~\cite{coldren2012}:
+\begin{align}
+  \frac{dN}{dt}&=\frac{I-I_l}{q}-\frac{N}{\tau_n}-G(S)\,(N-N_T)\,S,\\
+  \frac{dS}{dt}&=\beta\frac{N}{\tau_n}+G(S)\,(N-N_T)\,S-\frac{S}{\tau_p},\qquad G(S)=\frac{g_0}{1+\epsilon S},\\
+  \frac{d\phi}{dt}&=\frac{\alpha_H}{2}\Big(g_0(N-N_T)-\frac1{\tau_p}\Big).
+  \label{eq:rate}
+\end{align}
+The terms are: injection of the current $I$ minus a leakage $I_l$; carrier recombination with
+lifetime $\tau_n$; stimulated emission with gain coefficient $g_0$ above the transparency carrier
+number $N_T$, compressed by $\epsilon$ at high photon numbers; the fraction $\beta$ of spontaneous
+emission that falls into the lasing mode; photon loss through the mirrors and absorption with
+lifetime $\tau_p$. The output power is the emitted share $\eta_{\mathrm{opt}}$ of the photon loss rate,
+\begin{equation}
+  P=\eta_{\mathrm{opt}}\,\frac{hf\,S}{\tau_p},
+\end{equation}
+and the phase equation, with the linewidth-enhancement (Henry) factor $\alpha_H$, expresses that a
+change of carrier density changes the refractive index together with the gain. All quantities are
+numbers rather than densities, as in the circuit models of
+VCSELs~\cite{mena1999,shi2009}.
+
+\paragraph{Steady state and the P-I curve.} With $dN/dt=dS/dt=0$, $\beta=0$ and $\epsilon=0$, the
+photon equation either has $S=0$ or clamps the gain at the losses, $g_0(N-N_T)=1/\tau_p$. Above
+threshold the carrier number stays at
+\begin{equation}
+  N_{\mathrm{th}}=N_T+\frac1{g_0\tau_p},\qquad I_{\mathrm{th}}=\frac{qN_{\mathrm{th}}}{\tau_n}+I_l,
+\end{equation}
+and every additional carrier becomes a photon:
+\begin{equation}
+  P=\eta_{\mathrm{opt}}\frac{hf}{q}\,(I-I_{\mathrm{th}}).
+\end{equation}
+This is the linear P-I curve of \cref{fig:vcsel-li}: below threshold the laser behaves like an LED
+(spontaneous emission only), above it the slope efficiency is $\eta_{\mathrm{opt}}hf/q$ (W/A), and at high
+current gain compression and heating bend it down. With $\beta>0$ the threshold is soft. The test
+suite checks the threshold and the slope exactly.
+
+In general (with $\beta$, $\epsilon$ and the spatial terms of \cref{sec:vcsel}) the steady state is found
+from the photon number: for a given $S$ the two stationary equations for the carriers are linear,
+so $N$ follows in closed form, and the current that sustains it is
+$I=q\big(N/\tau_n+G(S)(N-N_T)S\big)+I_l$. This current grows monotonically with $S$, and a bisection on
+$\ln S$ inverts it.
+\codeexcerpt{laser_steady}{Carriers that hold the photon number constant.}
+
+\paragraph{Large-signal response.} The blocks integrate \cref{eq:rate} in time with fourth-order
+Runge--Kutta, using $\ln S$ instead of $S$ (the photon number spans many decades between below and
+above threshold) and sub-steps no longer than $\tau_p$. The drive current is linearly interpolated
+between samples. Each frame starts from the static state; before the frame, the integrator runs
+over its last $3\tau_n$, so that it starts in the state in which it ends, as the circular FFTs
+downstream require. When numba is installed the loop is compiled (about 20\,ms per frame of a few
+thousand samples); otherwise the same code runs in NumPy.
+\codeexcerpt{laser_rhs}{Right-hand side of the rate equations (single mode and VCSEL).}
+
+\paragraph{Small-signal response.} Around a bias point the rate equations can be linearized,
+$\dot{\vect x}=\mat A\vect x+\vect b\,\delta I$, with $\vect x$ the deviations of the carriers and photons,
+$\mat A$ the Jacobian and $\vect b=(1/q,0,0)\T$. The modulation response is
+\begin{equation}
+  H(j\omega)=\frac{\vect e_S\T(j\omega\mat I-\mat A)^{-1}\vect b}{\vect e_S\T(-\mat A)^{-1}\vect b}.
+\end{equation}
+For the single-mode laser it reduces to the classic damped resonance
+\begin{gather}
+  H(f)\approx\frac{f_r^2}{f_r^2-f^2+jf\gamma/(2\pi)},\qquad
+  (2\pi f_r)^2\approx\frac{g_0S}{\tau_p(1+\epsilon S)},\\
+  \gamma\approx Kf_r^2+\frac1{\tau_n},\qquad K=4\pi^2\Big(\tau_p+\frac{\epsilon}{g_0}\Big),
+\end{gather}
+so the relaxation frequency grows with the square root of the photon number (of $I-I_{\mathrm{th}}$), the
+damping grows with $f_r^2$ (the K-factor), and the bandwidth saturates. The RC parasitics of the
+chip add a pole, $1/(1+jf/f_p)$ (\prm{parasitic_ghz}), applied to the drive current. This is the
+response the inspector plots for \blk{dml} and \blk{vcsel}.
+\codeexcerpt{laser_small_signal}{Small-signal response from the linearized rate equations.}
+
+\subsection{Chirp of a directly modulated laser}\label{sec:chirp}
+Changing the current changes the carrier density, hence the index and the optical phase (and
+the temperature, on longer time scales). The phase equation \cref{eq:rate} gives the frequency
+deviation. Using the photon equation to eliminate the gain and neglecting spontaneous emission,
+$g_0(N-N_T)-1/\tau_p\approx d\ln S/dt+\epsilon S/\tau_p$, hence
+\begin{equation}
+  \Delta\nu(t)=\frac{\alpha_H}{4\pi}\Big(\frac{d}{dt}\ln P(t)+\kappa P(t)\Big),\qquad
+  \kappa=\frac{\epsilon}{\eta_{\mathrm{opt}}hf},
+\end{equation}
+the Koch--Bowers relation~\cite{koch1984}. The first term, the \emph{transient} chirp, follows the
+edges of the power; the second, the \emph{adiabatic} chirp, is a frequency offset proportional to
+the power, $\alpha_H\kappa/(4\pi)$, about 1.1\,GHz/mW for the default DFB. In the block the carrier
+frequency is defined at the mean current, so the adiabatic term moves the "1" and "0" levels to
+opposite sides of the carrier (\cref{fig:dml-chirp}). The test suite checks the adiabatic step
+against $\frac{\alpha_H}{4\pi}\epsilon(S_1-S_0)/\tau_p$ to 2\,\%.
+
+A bit-synchronous phase modulation broadens the optical spectrum considerably, so a directly
+modulated laser (DML) is far more sensitive to chromatic dispersion than an external modulator.
+This is why low-cost high-rate DMLs work in the O band, near the zero-dispersion wavelength: the
+higher loss and the lack of amplifiers do not matter over 2--40\,km, and data-center links use
+millions of them. The \emph{56\,Gb/s PAM-4 with a directly modulated laser} scenario shows it:
+error-free over 10\,km at 1310\,nm, closed within 2\,km at 1550\,nm.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
-\begin{axis}[width=10cm,height=5.2cm,xlabel={DGD $\tau/\langle\tau\rangle$},ylabel={pdf},xmin=0,xmax=3,ymin=0,
-  legend pos=north east]
-  \addplot[th=accent] table[x=x,y=maxwell]{\datafile{pmd_dgd}};
-  \addplot[sim=accent2,mark size=1.2pt] table[x=x,y=hist]{\datafile{pmd_dgd}};
-  \legend{Maxwellian,{waveplate model, $N=10$}}
+\begin{groupplot}[group style={group size=1 by 2,vertical sep=4mm,x descriptions at=edge bottom},
+  width=12.5cm,height=4.0cm,xmin=0,xmax=1600]
+\nextgroupplot[ylabel={$P$ [mW]},ymin=0]
+  \addplot[th=accent] table[x=t_ps,y=p_mw]{\datafile{dml_chirp}};
+\nextgroupplot[ylabel={$\Delta\nu$ [GHz]},xlabel={$t$ [ps]}]
+  \addplot[th=accent2] table[x=t_ps,y=f_ghz]{\datafile{dml_chirp}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Output of \blk{dml} for a 10\,Gb/s pattern (40\,mA bias, $\pm25$\,mA, 25\,GHz parasitic pole):
+relaxation-oscillation ringing on the power, transient chirp spikes on the edges and adiabatic
+chirp separating the frequencies of the two levels.}
+\label{fig:dml-chirp}
+\end{figure}
+
+\subsection{The directly modulated laser block}
+\blk{dml} turns the normalized drive $x\in[-1,1]$ into the current
+$I=I_{\mathrm{bias}}+I_{\mathrm{mod}}x$, passes it through the parasitic pole and integrates the rate
+equations. The defaults describe a 25G-class O-band DFB: threshold 10\,mA, 3-dB bandwidth about
+28\,GHz at 60\,mA, $\alpha_H=4$. The metrics are the threshold current, the average power and the
+static extinction ratio $P(I_{\mathrm{bias}}+I_{\mathrm{mod}})/P(I_{\mathrm{bias}}-I_{\mathrm{mod}})$. Directly modulated lasers
+have low extinction ratios (below 8\,dB, 3--4\,dB for the fastest), which costs sensitivity
+(\cref{sec:imdd-penalties}); their PAM levels are characterized by the outer optical modulation
+amplitude, $\mathrm{OMA}=P_{\mathrm{high}}-P_{\mathrm{low}}$. For example, a PAM-4 DML with levels 1, 2.5, 4 and 5.5\,mW has
+$\bar P=3.25$\,mW (5.1\,dBm), $\mathrm{ER}=7.4$\,dB and $\mathrm{OMA}=4.5$\,mW. The best DMLs reach 40--50\,GBd and
+cost an order of magnitude less than externally modulated transmitters.
+\codeexcerpt{laser_block}{Drive current, rate equations and noise of the laser blocks.}
+
+\begin{pitfall}[What the laser blocks leave out]
+The rate equations are deterministic: RIN and linewidth are added as separate noise terms with
+the measured values instead of Langevin forces, and the linewidth is not tied to $\alpha_H$ and
+$\beta$. The DFB has no thermal model (a TEC holds its temperature), so the thermal part of the chirp
+is absent. Mode competition between longitudinal modes is not modelled.
+\end{pitfall}
+
+% ==================================================================
+\section{The VCSEL}\label{sec:vcsel}
+A vertical-cavity surface-emitting laser (VCSEL) has its cavity along the growth direction,
+between two distributed Bragg reflectors (DBRs), with an oxide aperture that confines current and
+light. The cavity is so short that only one longitudinal mode fits; the planar structure gives a
+circular beam that couples well into fiber, allows on-wafer testing and two-dimensional arrays,
+and the small volume gives a high modulation bandwidth at low current. VCSELs at 850\,nm are the
+cheapest lasers for multimode data-center links. Two physical effects shape their behaviour and
+are missing from the single-mode rate equations~\cite{shi2009}:
+\begin{itemize}
+  \item \textbf{self-heating}: poor heat dissipation and the resistance of the DBRs heat the
+  device, raising the threshold and rolling the output power over at high current;
+  \item \textbf{spatial effects}: the transverse profiles of carriers and photons differ; the
+  lasing mode depletes the carriers at the centre (spatial hole burning) and lateral diffusion
+  refills them, which causes mode competition and secondary pulsations at turn-off.
+\end{itemize}
+\blk{vcsel} implements the circuit-level model of Shi, Qi, Wang and Hu~\cite{shi2009}, built on the
+spatially independent rate equations of Morikuni et al.~\cite{morikuni1999} and the
+comprehensive model of Mena et al.~\cite{mena1999}.
+
+\subsection{Spatially dependent rate equations}
+Letting the carrier and photon numbers depend on the radial position $r$ in the active disc of
+radius $R$,
+\begin{align}
+  \frac{\partial N(r,t)}{\partial t}&=\frac{I(r,t)}{q}-\frac{N(r,t)}{\tau_n}-G(r,t)S(r,t),\\
+  \frac{\partial S(r,t)}{\partial t}&=\beta\frac{N(r,t)}{\tau_n}+G(r,t)S(r,t)-\frac{S(r,t)}{\tau_s},\qquad
+  G(r,t)=\frac{G_0\big[N(r,t)-N_T\big]}{1+\epsilon S_0},
+\end{align}
+with $S_0$ the magnitude of the photon distribution and $\tau_s$ the photon lifetime. Solving these
+needs a discretization in space and time, too heavy for system simulation.
+
+\subsection{Bessel expansion and the reduced equations}
+With cylindrical symmetry the carrier profile is expanded in the eigenfunctions of the disc and
+the photon profile is fixed:
+\begin{equation}
+  N(r,t)=N_0(t)-\sum_{i\ge1}N_i(t)\,J_0\Big(\frac{\sigma_ir}{R}\Big),\qquad S(r,t)=S_0(t)\,\psi(r),
+\end{equation}
+where $J_0$ is the Bessel function of order zero and $\sigma_i$ the $i$-th root of $J_1$
+($\sigma_0=0$, $\sigma_1=3.8317$, so that the radial carrier flux vanishes at the edge). The functions
+are orthogonal on the disc,
+\begin{equation}
+  \int_0^RJ_0\Big(\frac{\sigma_mr}{R}\Big)J_0\Big(\frac{\sigma_nr}{R}\Big)r\,dr=
+  \begin{cases}0 & m\ne n\\ \frac{R^2}{2}J_0^2(\sigma_m) & m=n,\end{cases}
+\end{equation}
+so projecting the carrier equation on each term gives one ordinary equation per coefficient.
+Keeping two terms ($N_0$, the mean carrier number, and $N_1$, the depth of the hole burnt by the
+mode) and a uniform current leaves three equations:
+\begin{align}
+  \frac{dN_0}{dt}&=\frac{I-I_l}{q}-\frac{N_0}{\tau_n}-\frac{G_0}{1+\epsilon S_0}\big[(N_0-N_T)h_0-N_1h_1\big]S_0,\\
+  \frac{dN_1}{dt}&=\frac{G_0}{1+\epsilon S_0}\big[(N_0-N_T)h_2-N_1h_3\big]S_0-\frac{N_1}{\tau_n}(1+h),\\
+  \frac{dS_0}{dt}&=\beta\frac{N_0}{\tau_n}+\frac{G_0}{1+\epsilon S_0}\big[(N_0-N_T)h_0-N_1h_1\big]S_0-\frac{S_0}{\tau_s}.
+\end{align}
+Lateral diffusion with coefficient $D$ turns into the extra decay $h/\tau_n$ of the hole, with
+$h=(\sigma_1L_D/R)^2$ and the diffusion length $L_D=\sqrt{D\tau_n}$. The coefficients $h_i$ are overlap
+integrals between the photon and carrier distributions:
+\begin{gather}
+  h_0=\frac{2}{R^2}\int_0^R\psi(r)\,r\,dr,\qquad
+  h_1=\frac{2}{R^2}\int_0^R\psi(r)J_0\Big(\frac{\sigma_1r}{R}\Big)r\,dr,\\
+  h_2=\frac{2}{R^2J_0^2(\sigma_1)}\int_0^R\psi(r)J_0\Big(\frac{\sigma_1r}{R}\Big)r\,dr,\qquad
+  h_3=\frac{2}{R^2J_0^2(\sigma_1)}\int_0^R\psi(r)J_0^2\Big(\frac{\sigma_1r}{R}\Big)r\,dr,
+\end{gather}
+with $J_0(\sigma_1)=-0.4028$. For the Gaussian mode (zero-order Laguerre--Gauss beam of waist $R_m$)
+\begin{equation}
+  \psi(r)=2\Big(\frac{R}{R_m}\Big)^2\exp\!\Big(-\frac{2r^2}{R_m^2}\Big),\qquad h_0=1-e^{-2R^2/R_m^2},
+\end{equation}
+and the other integrals are evaluated numerically. For the default device ($R=3.5$\,\textmu m,
+$R_m=2.5$\,\textmu m, $L_D=1.5$\,\textmu m) $h_0=\vcselhzero$, $h_1=\vcselhone$, $h_2=\vcselhtwo$,
+$h_3=\vcselhthree$ and $h=\vcselhd$. With $h_1=h_2=h_3=0$ and $h_0=1$ the equations reduce to the single-mode
+laser of \cref{sec:lasers}, which is how the code handles both. The test suite checks the closed form
+of $h_0$ and the narrow-mode limits $h_1\to1-\sigma_1^2R_m^2/(8R^2)$, $h_3\to h_2$.
+\codeexcerpt{laser_overlap}{Overlap integrals of the Gaussian mode with the Bessel modes.}
+
+\paragraph{Turn-off transient.} When the current drops below threshold the photons disappear in
+a few photon lifetimes, but the carriers lost to hole burning are then refilled by diffusion
+from the edges of the disc. The carrier number in the mode region momentarily exceeds threshold
+again and the laser emits a secondary pulse. \Cref{fig:vcsel-transient} reproduces the square-wave
+experiment of the paper (0.5 and 5\,mA): with hole burning the light lingers and rings after the
+falling edge, while the uniform model switches off at once. The test suite checks that the
+emitted energy after turn-off is larger with hole burning.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=16mm},width=6.9cm,height=5.2cm,
+  xlabel={$t$ [ns]},ymin=0]
+\nextgroupplot[ylabel={output power [mW]},xmin=0,xmax=10,legend pos=north east,legend style={font=\scriptsize}]
+  \addplot[th=accent] table[x=t_ns,y=shb]{\datafile{vcsel_transient}};
+  \addplot[th=accent2,dashed] table[x=t_ns,y=uniform]{\datafile{vcsel_transient}};
+  \legend{hole burning,uniform carriers}
+\nextgroupplot[xmin=2.4,xmax=3.4,ymax=0.6,title={turn-off (zoom)}]
+  \addplot[th=accent] table[x=t_ns,y=shb]{\datafile{vcsel_turnoff}};
+  \addplot[th=accent2,dashed] table[x=t_ns,y=uniform]{\datafile{vcsel_turnoff}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Response of \blk{vcsel} to a square current between 0.5 and 5\,mA (thermal model and
+parasitics off), after Fig.~2 of Shi et al.~\cite{shi2009}. Right: after the falling edge at 2.5\,ns,
+diffusion refills the burnt hole and the laser emits a secondary pulse 0.3\,ns later.}
+\label{fig:vcsel-transient}
+\end{figure}
+
+\subsection{Tucker's thermal model}
+As the device heats up, the bandgap of the active layer shrinks and the active region no longer
+confines the carriers: a thermal leakage current, modelled as a polynomial in temperature,
+\begin{equation}
+  I_l(T)=\sum_{i=1}^{n}a_iT^{\,i-1},
+\end{equation}
+is lost from the injection. The power dissipated as heat is the electrical power minus the light,
+$\Delta P=VI-P_L$, and the junction temperature follows the thermal rate equation
+\begin{equation}
+  T=T_0+R_{\mathrm{th}}\Delta P-\tau_{\mathrm{th}}\frac{dT}{dt},
+\end{equation}
+with ambient temperature $T_0$, thermal impedance $R_{\mathrm{th}}$ and thermal time constant
+$\tau_{\mathrm{th}}\approx1$\,\textmu s. The electrical characteristic is that of a diode with series resistance,
+\begin{equation}
+  V=nV_T\ln\Big(\frac{I}{I_{ss}}+1\Big)+IR_s,\qquad R_s(T)=\frac{c_1}{T-c_2},\qquad I_{ss}(T)=b_1I_{ss0}(T-b_2),
+\end{equation}
+with ideality factor $n$, thermal voltage $V_T=kT/q$ and temperature-dependent series resistance
+and saturation current. In a SPICE implementation the diode, the photon storage ($C_{ph}=qS_c$) and
+loss ($R_{ph}=\tau_{ph}/C_{ph}$) become circuit elements~\cite{shi2009}; LinkStudio solves the same
+equations directly.
+\codeexcerpt{vcsel_vi}{Diode characteristic with temperature-dependent parameters.}
+
+\begin{incode}
+The thermal time constant is three orders of magnitude longer than a frame (a few ns), so the
+temperature cannot follow the bits: it settles at the operating point set by the mean current.
+\blk{vcsel} solves $T=T_0+R_{\mathrm{th}}\big(V(I,T)I-P(I-I_l(T))\big)$ at the bias current by damped
+fixed-point iteration, subtracts the resulting leakage from the drive and reports the junction
+temperature as a metric. The same solver at every current gives the static L-I curves
+(\code{light_current}).
+\end{incode}
+\codeexcerpt{vcsel_thermal}{Static operating point of Tucker's thermal model.}
+
+\Cref{fig:vcsel-li} shows the static L-I curves at four ambient temperatures, the counterpart of
+Fig.~1 of the paper. The threshold grows with temperature because the leakage adds to the
+threshold current; at high current the self-heating raises the leakage faster than the current,
+and the power rolls over. At 80\,°C the peak power is below a third of its 25\,°C value. The default
+device (25G class, threshold $\vcselith$\,mA plus leakage, $R_{\mathrm{th}}=3$\,K/mW) runs at
+$\vcseltemp$\,°C at its 7\,mA bias, with $\vcselleak$\,mA of leakage.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=16mm},width=6.9cm,height=5.4cm,
+  xlabel={current [mA]},xmin=0,xmax=30]
+\nextgroupplot[ylabel={output power [mW]},ymin=0,legend pos=north west,legend style={font=\scriptsize}]
+  \addplot[th=accent] table[x=i_ma,y=p25]{\datafile{vcsel_li}};
+  \addplot[th=accent3] table[x=i_ma,y=p50]{\datafile{vcsel_li}};
+  \addplot[th=accent4] table[x=i_ma,y=p65]{\datafile{vcsel_li}};
+  \addplot[th=accent2] table[x=i_ma,y=p80]{\datafile{vcsel_li}};
+  \legend{25\,°C,50\,°C,65\,°C,80\,°C}
+\nextgroupplot[ylabel={junction temperature [°C]},ymin=0]
+  \addplot[th=accent] table[x=i_ma,y=t25]{\datafile{vcsel_li}};
+  \addplot[th=accent3] table[x=i_ma,y=t50]{\datafile{vcsel_li}};
+  \addplot[th=accent4] table[x=i_ma,y=t65]{\datafile{vcsel_li}};
+  \addplot[th=accent2] table[x=i_ma,y=t80]{\datafile{vcsel_li}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Static L-I curves (left) and junction temperature (right) of the default \blk{vcsel} at
+four ambient temperatures: thermal leakage raises the threshold and rolls the power over.}
+\label{fig:vcsel-li}
+\end{figure}
+
+\subsection{Modulation response}
+Linearizing the three equations gives the small-signal response including hole burning and
+diffusion (\cref{fig:laser-response}). The resonance moves up and the damping grows with the bias;
+above about 8\,mA the response is overdamped. The markers are the amplitude of the simulated power
+when the block is driven by a small sinusoid: they lie on the linearized response within
+0.01\,dB, which validates the integrator and the Jacobian together.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=5.4cm,xlabel={frequency [GHz]},ylabel={$|H(f)|$ [dB]},xmin=0,xmax=40,ymin=-20,
+  ymax=8,legend pos=south west]
+  \addplot[th=accent3] table[x=f,y=i2]{\datafile{laser_response}};
+  \addplot[th=accent] table[x=f,y=i4]{\datafile{laser_response}};
+  \addplot[th=accent4] table[x=f,y=i8]{\datafile{laser_response}};
+  \addplot[sim=accent2] table[x=f,y=h]{\datafile{laser_response_sim}};
+  \legend{2\,mA,4\,mA,8\,mA,{simulated, 4\,mA}}
 \end{axis}
 \end{tikzpicture}
-\caption{DGD distribution of 20\,000 fibers built by \code{pmd_transfer} against the Maxwellian
-density $\frac{32\tau^2}{\pi^2\langle\tau\rangle^3}e^{-4\tau^2/(\pi\langle\tau\rangle^2)}$.}
-\label{fig:pmd}
+\caption{Small-signal modulation response of the VCSEL rate equations (hole burning on, thermal
+model and parasitic pole off) at three bias currents, with large-signal simulation points.}
+\label{fig:laser-response}
 \end{figure}
 
-% ==================================================================
-\section{Optical amplification and OSNR}
-\subsection{ASE noise}
-An erbium-doped fiber amplifier of gain $G$ adds amplified spontaneous emission with power
-spectral density, per polarization,
-\begin{equation}
-  S_{\mathrm{ASE}}=n_{\mathrm{sp}}\,h\nu\,(G-1),\qquad \mathrm{NF}=\frac{2n_{\mathrm{sp}}(G-1)}{G}\ \Rightarrow\ n_{\mathrm{sp}}=\frac{\mathrm{NF}\cdot G}{2(G-1)},
-\end{equation}
-where the noise figure NF is at least 2 (3\,dB) for $n_{\mathrm{sp}}\ge1$. In the simulation band
-$f_s$, the ASE is circular Gaussian noise of variance $S_{\mathrm{ASE}}f_s$ per polarization.
-\codeexcerpt{ase}{ASE density from gain and noise figure.}
-\codeexcerpt{add_ase}{ASE noise in the simulated bandwidth.}
+\begin{pitfall}[VCSEL parameters]
+Shi et al.\ take their parameters from Mena et al.~\cite{mena1999} without listing them. The
+defaults of \blk{vcsel} are a self-consistent 25G-class 850\,nm device: carrier and photon numbers
+from an aperture of 7\,\textmu m and three quantum wells, gain coefficient chosen for a 15\,GHz relaxation
+frequency at 7\,mA, slope efficiency 0.55\,W/A, and a cubic leakage polynomial
+($I_l=2\times10^{-9}T^3$\,A, $T$ in °C) that reproduces the qualitative behaviour of the paper. Fit
+the parameters to measured L-I and S$_{21}$ curves before drawing quantitative conclusions. The model
+also keeps a single transverse mode for the photons; the multimode spectrum enters only through
+\prm{spectral_width_nm} in the multimode fiber.
+\end{pitfall}
 
-\subsection{Optical signal-to-noise ratio}
-The OSNR is measured in a reference bandwidth $B_{\mathrm{ref}}=12.5$\,GHz (0.1\,nm at 1550\,nm),
-counting the noise in both polarizations:
+% ==================================================================
+\section{External modulators}\label{sec:modulators}
+\subsection{External modulation}
+In external modulation the laser runs in CW at constant current, emitting
+$E_{CW}(t)=\sqrt{P_{CW}}\,e^{j\phi_0}$, and a separate device driven by the electrical signal $V_{\mathrm{mod}}(t)$
+imposes the modulation,
 \begin{equation}
-  \mathrm{OSNR}=\frac{P}{2S_{\mathrm{ASE}}B_{\mathrm{ref}}} .
+  E_{\mathrm{mod}}(t)=\sqrt{P_{CW}}\,e^{j\phi_0}\,f\big(V_{\mathrm{mod}}(t)\big).
 \end{equation}
-In a chain of $N$ identical spans, each followed by an amplifier compensating its loss
-($G=e^{\alpha L_{\mathrm{span}}}$), the ASE adds up while the signal power is restored. With the
-NF definition above, $2S_{\mathrm{ASE}}\approx\mathrm{NF}\,G\,h\nu$, so
+Most modulators exploit a voltage-dependent refractive index. In a lithium-niobate (LiNbO$_3$)
+waveguide the electro-optic effect makes the phase linear in the applied voltage,
+$E_{\mathrm{out}}=E_{\mathrm{in}}e^{jkV}$: a few centimetres of waveguide are an almost perfect phase modulator.
+
+\subsection{The Mach--Zehnder modulator}
+Two such phase modulators in the arms of a Mach--Zehnder interferometer, with 3-dB couplers,
+give
 \begin{equation}
-  \mathrm{OSNR}_{\mathrm{dB}}\approx\underbrace{-10\log_{10}\frac{h\nu B_{\mathrm{ref}}}{1\,\mathrm{mW}}}_{58.0\ \mathrm{dB}}
-  +P_{\mathrm{dBm}}-G_{\mathrm{dB}}-\mathrm{NF}_{\mathrm{dB}}-10\log_{10}N,
-  \label{eq:osnr58}
+  E_{\mathrm{out}}=\frac{E_{\mathrm{in}}}{2}\big(e^{jkV_1}+e^{jkV_2}\big)
+  =E_{\mathrm{in}}\,e^{jk\frac{V_1+V_2}{2}}\cos\Big(k\frac{V_1-V_2}{2}\Big):
+  \label{eq:mzm}
 \end{equation}
-the ``58\,dB rule'' of link design.
-\codeexcerpt{link_loop}{The multi-span link: propagate, amplify, accumulate the ASE density.}
+the difference voltage modulates the amplitude, the sum voltage the phase. In \emph{push-pull}
+operation ($V_1=-V_2=V/2$) the phase term vanishes and the modulation is purely amplitude,
+\emph{chirp-free}. The voltage that moves the output from minimum to maximum is the switching or
+half-wave voltage $V_\pi$ ($k=\pi/V_\pi$). With a static bias that shifts one arm by $-\pi/2$ relative
+to the other, the null is at $V=0$ and the characteristic is the sine law
+\begin{equation}
+  E_{\mathrm{out}}=E_{\mathrm{in}}\sin\Big(\frac\pi2\frac{V}{V_\pi}\Big),\qquad
+  P_{\mathrm{out}}=P_{\mathrm{in}}\sin^2\Big(\frac\pi2\frac{V}{V_\pi}\Big)=\frac{P_{\mathrm{in}}}{2}\Big[1-\cos\Big(\pi\frac{V}{V_\pi}\Big)\Big]
+\end{equation}
+(\cref{fig:mzm}). The field characteristic is odd and spans $\pm E_{\mathrm{in}}$ for $V\in[-V_\pi,V_\pi]$: biased at
+null it modulates the field (coherent formats). The power characteristic is a raised cosine:
+biased at quadrature ($V_\pi/2$) with a swing of $\pm V_\pi/2$ it goes from null to peak, as needed for
+OOK and PAM-M. The drive of an OOK transmitter is
+\begin{equation}
+  V(t)=V_{\mathrm{bias}}+\frac{V_\pi}{2}\sum_k\alpha_ks(t-kT_s),\qquad \alpha_k=\pm1,\ \max s(t)=1,
+\end{equation}
+and the average output power is $(P_{\mathrm{out}}^1+P_{\mathrm{out}}^0)/2$. For PAM-4 the four voltage levels are
+placed on the $\sin^2$ curve so that the powers are equally spaced:
+$V_i=\frac{2V_\pi}{\pi}\arcsin\sqrt{P_i/P_{\mathrm{in}}}$.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
-\begin{semilogxaxis}[width=10cm,height=5.4cm,xlabel={number of spans $N$},ylabel={OSNR [dB]},
-  xmin=0.8,xmax=50,ymin=18,ymax=40,legend pos=north east]
-  \addplot[th=accent] table[x=spans,y=rule58]{\datafile{osnr_spans}};
-  \addplot[sim=accent2] table[x=spans,y=sim]{\datafile{osnr_spans}};
-  \legend{58\,dB rule \eqref{eq:osnr58},\blk{optical_link} metric}
-\end{semilogxaxis}
+\begin{axis}[width=10cm,height=5.4cm,xlabel={drive $V/V_\pi$},ylabel={normalized output},xmin=-1,xmax=1.2,
+  ymin=-1.1,ymax=1.1,legend pos=north west,samples=121,legend style={font=\scriptsize}]
+  \addplot[th=accent,domain=-1:1.2] {sin(90*x)};
+  \addplot[th=accent2,domain=-1:1.2] {sin(90*x)^2};
+  \addplot[th=black!50,dashed,domain=-0.6:0.6] {pi/2*x};
+  \draw[accent3,fill=accent3!15,opacity=0.5] (axis cs:-0.5,-1.1) rectangle (axis cs:0.5,1.1);
+  \draw[accent2,thick,|-|] (axis cs:0,-0.95) -- (axis cs:1,-0.95) node[midway,above,font=\scriptsize]{IM/DD swing};
+  \fill[accent2] (axis cs:0.5,0.5) circle (1.5pt) node[right,font=\scriptsize]{quadrature bias};
+  \legend{field $\sin(\frac\pi2 V/V_\pi)$,power $\sin^2(\frac\pi2V/V_\pi)$,linear approx.}
+\end{axis}
 \end{tikzpicture}
-\caption{OSNR after $N\times80$\,km (0.2\,dB/km, NF\,=\,5\,dB, 0\,dBm per channel). The block's
-metric and the rule differ by less than 0.05\,dB, the effect of the $G-1\approx G$ approximation
-and of the exact photon energy.}
-\label{fig:osnr}
+\caption{Sine-law characteristic of a push-pull MZM. Coherent transmitters bias at null and
+drive the field (shaded: the default IQ drive swing of $0.5\,V_\pi$); IM/DD transmitters bias at
+quadrature and swing over half the period of the power.}
+\label{fig:mzm}
 \end{figure}
 
-\subsection{From OSNR to $E_s/N_0$}
-For a coherent receiver whose noise is the ASE, the noise density per polarization is
-$N_0=S_{\mathrm{ASE}}$ and the signal power per polarization is $P/p$ for $p$ polarizations.
-Hence
+\paragraph{Parameters.} Commercial lithium-niobate MZMs have $V_\pi=3$--5\,V, extinction ratios
+$\mathrm{ER}=P_{\mathrm{out}}^1/P_{\mathrm{out}}^0$ of 15--20\,dB (up to 30\,dB), electro-optic bandwidths of tens of GHz (60--100\,GHz
+for the best) and insertion losses $L$ of 3--5\,dB, so $P_{\mathrm{out,dBm}}^1=P_{\mathrm{laser,dBm}}-L_{\mathrm{dB}}$. A 45\,mW
+(16.5\,dBm) DFB, an MZM with 4\,dB loss and full-swing OOK give an average of
+$16.5-4-3=9.5$\,dBm. The extinction ratio is finite because the arms are never exactly balanced.
+The electrodes, package and driver limit the bandwidth; their effect is an equivalent
+electrical response $H_{\mathrm{mod}}(f)$ applied to the drive before the electro-optic conversion. MZMs
+cost around a thousand euros, largely because of the drivers.
+
+\paragraph{Electro-absorption modulators.} An EAM absorbs light below a cutoff wavelength that an
+applied voltage shifts (Franz--Keldysh effect, quantum-confined Stark effect). It is almost
+chirp-free, can be integrated with a DFB laser (EML) and is common for 20--40\,km links. It is
+modelled by \blk{intensity_modulator}.
+
+\subsection{The modulator blocks}
+\blk{mach_zehnder_modulator} combines a CW laser (power, linewidth, RIN) with an MZM. The drive
+$x\in[-1,1]$, filtered by a first-order $H_{\mathrm{mod}}$ (\prm{bandwidth_ghz}), sets
+$V=V_{\mathrm{bias}}+V_{\mathrm{swing}}x$, with quadrature bias and $V_\pi/2$ swing by default. A finite extinction ratio
+comes from unequal arm amplitudes $(1\pm\delta)/2$:
 \begin{equation}
-  \frac{E_s}{N_0}=\frac{P/p}{S_{\mathrm{ASE}}R_s}=\mathrm{OSNR}\cdot\frac{2B_{\mathrm{ref}}}{p\,R_s},
+  \frac{E_{\mathrm{out}}}{E_{\mathrm{in}}}=\frac1j\Big(\frac{1+\delta}{2}e^{j\theta}-\frac{1-\delta}{2}e^{-j\theta}\Big)=\sin\theta-j\delta\cos\theta,
+  \qquad \theta=\frac{\pi V}{2V_\pi},\quad \delta=10^{-\mathrm{ER}/20},
 \end{equation}
-implemented as \code{osnr_to_esn0_db}. The test-suite uses it to check that the full coherent
-DP-QPSK link (\cref{sec:coherent-dsp}) performs within about 0.3\,dB of theory.
+so $|E_{\mathrm{out}}|^2=\sin^2\theta+\delta^2\cos^2\theta$ swings between $\delta^2$ and 1, and the imbalance leaves a
+small residual chirp. With \prm{drive}\code{=single_arm} ($V_1=V$, $V_2=0$) the output becomes
+$e^{j\theta}\sin\theta$: the phase follows the drive, the chirp of a single-drive modulator. The metrics
+are the average output power and the modulated extinction ratio.
+\codeexcerpt{mzm_field}{Field transfer of the MZM with arm imbalance and drive mode.}
+\codeexcerpt{mzm_block}{CW laser and MZM (\blk{mach_zehnder_modulator}).}
+
+\blk{intensity_modulator} is the ideal transmitter assumed by the IM/DD formulas of
+\cref{sec:imdd}: the drive is mapped linearly to the power,
+\begin{equation}
+  P(t)=\bar P\big(1+m\,x(t)\big),\qquad m=\frac{\mathrm{ER}-1}{\mathrm{ER}+1},
+\end{equation}
+so a PAM-M drive with equally spaced levels gives powers equally spaced between $P_1$ and
+$P_M=\mathrm{ER}\,P_1$, with no chirp. It stands for a well-linearized external modulator or EML.
+\codeexcerpt{im_mod}{Linear intensity modulation (\blk{intensity_modulator}).}
+
+\subsection{The IQ modulator and the polarization-multiplexed transmitter}\label{sec:iq}
+Two MZMs biased at null, nested in a larger interferometer with a $90^\circ$ phase shift on one
+branch, modulate the in-phase and quadrature components of one polarization:
+\begin{equation}
+  E_x(t)=E_I(t)+jE_Q(t)\propto\sin\Big(\frac\pi2\frac{v_I(t)}{V_\pi}\Big)+j\sin\Big(\frac\pi2\frac{v_Q(t)}{V_\pi}\Big).
+\end{equation}
+A polarization-multiplexed (PM-QAM) transmitter splits one laser into two IQ modulators and
+combines their outputs on orthogonal polarizations with a polarization beam combiner (PBS),
+$\vect E(t)=E_x(t)\hat x+E_y(t)\hat y$. The transmitter DSP generates the four drive signals
+$v_{Ix},v_{Qx},v_{Iy},v_{Qy}$ from pulse-shaped constellation points, often pre-distorted for the
+sine law, and the drivers amplify them to the $V_\pi$ range. Small swings are nearly linear; large
+swings compress the outer constellation points (\cref{fig:mzm}).
+
+\paragraph{Signal normalization.} The four components are pulse trains,
+$E_{Ix}(t)=\sum_na_{Ix,n}g(t-nT)$ and so on, combined into the vector symbols
+$\vect a_n=a_{x,n}\hat x+a_{y,n}\hat y$ with $a_{x,n}=a_{Ix,n}+ja_{Qx,n}$. With
+$\E\{|\vect a_n|^2\}=\E|a_{x,n}|^2+\E|a_{y,n}|^2=1$ and a unit-energy pulse, $\int|g|^2dt=1$,
+\begin{equation}
+  \vect E(t)=\sqrt{\frac{P_{\mathrm{sig}}}{R_s}}\sum_n\vect a_ng(t-nT)=\sqrt{E_s}\sum_n\vect a_ng(t-nT),\qquad
+  \langle|\vect E(t)|^2\rangle=P_{\mathrm{sig}},
+\end{equation}
+with $E_s=P_{\mathrm{sig}}T$ the energy per (four-dimensional) symbol. For PM-QPSK with power split equally,
+$\E|a_{x,n}|^2=\frac12$ and the points are $\frac12(\pm1\pm j)$ on each polarization.
+
+\blk{iq_modulator} implements this transmitter: the complex drive is either mapped linearly to
+the field (\prm{model}\code{=linear}) or passed through the two sine laws with peak swing
+\prm{drive_swing}$\times V_\pi$, a finite child-MZM extinction ratio and an error of the $90^\circ$
+phase (\prm{quadrature_error_deg}). The output is scaled to the launch power \prm{power_dbm}, as a
+booster amplifier would, with the power split equally between polarizations, and the laser phase
+noise of \prm{linewidth_hz} is applied to both.
+\codeexcerpt{iq_mzm}{Nested MZMs with quadrature error and power normalization (\blk{iq_modulator}).}
 
 % ==================================================================
-\section{Wavelength-division multiplexing}
-\blk{wdm_multiplexer} surrounds the channel under test with $N_{\mathrm{ch}}-1$ neighbours at
-multiples of the channel spacing. The neighbours carry independent symbols with the same
-constellation, pulse shape and power. Propagating the composite field through a nonlinear
-fiber produces cross-phase modulation (the power of the neighbours modulates the phase of the
-channel under test) and four-wave mixing. \blk{wdm_demultiplexer} selects a channel with a
-second-order super-Gaussian optical filter, $|H(f)|=\exp\!\big(-\tfrac{\ln2}{2}(2f/B)^4\big)$, which
-is 3\,dB down at $\pm B/2$. The sample rate must cover all channels. The \emph{WDM with fiber
-nonlinearity} scenario shows the MER of the centre channel dropping by several dB when the
-neighbours are switched on.
-\codeexcerpt{wdm_demux}{Channel selection by frequency shift and optical filtering.}
+\section{Photodetection}\label{sec:photodetection}
+\subsection{PIN photodiodes}
+A PIN photodiode (p-doped, intrinsic, n-doped) converts photons into conduction electrons by
+absorption, ideally one electron per photon, so the current is proportional to the power:
+\begin{equation}
+  i(t)=\mathcal R\,P(t).
+\end{equation}
+In CW the photon rate is $P/hf$ and the electron rate $\eta_{ph}P/hf$, with the quantum efficiency
+$\eta_{ph}\le1$, so the responsivity is
+\begin{equation}
+  \mathcal R=\frac{q}{hf}\eta_{ph}\quad[\mathrm{A/W}].
+\end{equation}
+$q/hf$ is 1.25\,A/W at 1550\,nm, 1.07\,A/W at 1330\,nm and 0.68\,A/W at 850\,nm, so $\mathcal R\approx1$, 0.9 and
+0.6\,A/W for typical efficiencies (the value close to 1\,A/W in the C band is a numerical
+coincidence). The responsivity grows with wavelength up to the bandgap cutoff of the material (Si,
+Ge, InGaAs) and then drops. \blk{photodiode} takes \prm{responsivity} or computes it from
+\prm{quantum_efficiency} and the signal wavelength.
+
+The currents are small. A +1\,dBm transmitter, 80\,km of fiber at 0.22\,dB/km and 2\,dB of
+connectors give $-18.6$\,dBm (14\,\textmu W) and, with $\mathcal R=0.9$\,A/W, 12.4\,\textmu A: an electrical amplifier
+is indispensable.
+
+\subsection{The transimpedance amplifier and its noise}
+A direct-detection receiver is a photodiode followed by a transimpedance amplifier (TIA),
+$V_{TIA}(t)=G_{TIA}\,i(t)$ with $G_{TIA}$ in ohms (1600--2700\,\textohm{} for a 10GbE TIA, giving 25\,mV
+from 12.4\,\textmu A), a low-pass filter, sampling at $t_i=t_s+iT_s$ and the decision. The TIA noise is well
+described by an additive Gaussian current $n_I(t)$ at its input. Datasheets give it as
+\begin{itemize}
+  \item the input-referred RMS current $\sigma_I$ over the amplifier bandwidth, or its variance $\sigma_I^2$;
+  \item the one-sided input-referred noise density (IRND) in A/$\sqrt{\mathrm{Hz}}$, the square root of
+  the noise PSD,
+\end{itemize}
+related through the equivalent noise bandwidth $B_{eq}$ of the receiver:
+\begin{equation}
+  \sigma_I=\mathrm{IRND}\sqrt{B_{eq}},\qquad \sigma_I^2=\mathrm{IRND}^2B_{eq}.
+\end{equation}
+Examples: 1100\,nA$_{\mathrm{rms}}$ over 6\,GHz is 14\,pA/$\sqrt{\mathrm{Hz}}$; 1.4\,\textmu A over 21\,GHz is
+9.7\,pA/$\sqrt{\mathrm{Hz}}$; research TIAs above 35\,GHz have 12--25\,pA/$\sqrt{\mathrm{Hz}}$. With a CW signal and TIA noise
+only, the electrical SNR is
+\begin{equation}
+  \mathrm{SNR}_e=\frac{i_{Rx}^2}{\sigma_{TIA}^2}=\frac{(\mathcal RP_{Rx})^2}{\mathrm{IRND}^2B_{eq}} .
+\end{equation}
+For the example above ($i_{Rx}=12$\,\textmu A, $\sigma_I=1.1$\,\textmu A) it is 20.8\,dB: signal and noise are
+comparable. The TIA gain does not change the SNR (it multiplies both), and the bandwidth cannot be
+reduced below what the baud rate needs. Lower received powers need better receivers.
+
+\subsection{Quantum noise and shot noise}
+Even with a noiseless amplifier, the quantum nature of light limits detection. The number of
+photons arriving in a window $\Delta T$ is a Poisson variable with mean and variance
+\begin{equation}
+  \lambda=\E\{N_{Rx}\}=\Var\{N_{Rx}\}=\frac{P_{Rx}\Delta T}{hf_0},
+\end{equation}
+nearly Gaussian above about 10. The quantum-limited SNR is therefore
+\begin{equation}
+  \mathrm{SNR}_Q=\frac{\E\{N\}^2}{\Var\{N\}}=\frac{P_{Rx}\Delta T}{hf_0},
+\end{equation}
+an absolute bound for any photodetection. At 10\,Gb/s ($\Delta T=100$\,ps) and $-20$\,dBm it is 39.9\,dB,
+against 17\,dB for a PIN + TIA receiver with 20\,pA/$\sqrt{\mathrm{Hz}}$ over 5\,GHz; the quantum limit would
+reach 17\,dB at $-41.9$\,dBm. In practice the TIA noise dominates by more than 20\,dB.
+
+The same discreteness appears in the current as \emph{shot noise}: $I=q\xi$ with $\xi$ the Poisson
+electron rate gives the one-sided PSD $2qI$ and, over $B_{eq}$, $\sigma_{\mathrm{shot}}^2=2qB_{eq}\mathcal RP$. With
+$B_{eq}=1/(2\Delta T)$ and $\eta_{ph}=1$, $\mathrm{SNR}_{\mathrm{shot}}=\mathrm{SNR}_Q$. Both sources together give
+\begin{equation}
+  \mathrm{SNR}_{\mathrm{PIN}}=\frac{(\mathcal RP_{Rx})^2}{\mathrm{IRND}^2B_{eq}+2qB_{eq}\mathcal RP_{Rx}} .
+\end{equation}
+
+\subsection{Avalanche photodiodes}
+An avalanche photodiode (APD) multiplies each photoelectron by $M$ (10--30) in a high-field
+region, so $\mathcal R_{APD}=M\mathcal R$ and $i=M\mathcal RP$. The multiplication is itself random: the shot noise is
+amplified by $M^2$ and increased by the excess noise factor $F(M)>1$,
+\begin{equation}
+  \sigma_{APD}^2=2qB_{eq}M^2F\mathcal RP_{Rx},\qquad
+  \mathrm{SNR}_{\mathrm{APD}}=\frac{(\mathcal RMP_{Rx})^2}{\mathrm{IRND}^2B_{eq}+2qB_{eq}M^2F\mathcal RP_{Rx}} .
+\end{equation}
+McIntyre's theory gives $F=kM+(1-k)(2-1/M)$ with the ionization ratio $k$; datasheets often give the
+power law $F=M^x$ (InGaAs: $x\approx0.7$). The gain raises the signal above the TIA noise but the SNR
+grows less than $M^2$; for each power there is an optimum $M$. APDs are better than PINs at low
+power (\cref{fig:snr-receivers}) but more expensive, need a high reverse bias and have less
+bandwidth (avalanche build-up time). Single-photon avalanche detectors (SPADs), used in quantum
+communications, operate far beyond breakdown and fire on single photons.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=6cm,xlabel={received power [dBm]},ylabel={electrical SNR [dB]},xmin=-40,xmax=0,
+  ymin=-10,ymax=60,legend pos=north west,legend style={font=\scriptsize}]
+  \addplot[th=black!50,dashed] table[x=p,y=quantum]{\datafile{snr_receivers}};
+  \addplot[th=accent] table[x=p,y=pin]{\datafile{snr_receivers}};
+  \addplot[th=accent2] table[x=p,y=apd]{\datafile{snr_receivers}};
+  \addplot[sim=accent] table[x=p,y=pin]{\datafile{snr_receivers_sim}};
+  \addplot[sim={accent2,mark=square*}] table[x=p,y=apd]{\datafile{snr_receivers_sim}};
+  \legend{quantum limit $\mathrm{SNR}_Q$,PIN + TIA,{APD + TIA, $M=10$, $F=7$},\blk{photodiode} PIN,\blk{photodiode} APD}
+\end{axis}
+\end{tikzpicture}
+\caption{Electrical SNR of PIN and APD receivers ($\mathcal R=1$\,A/W, 20\,pA/$\sqrt{\mathrm{Hz}}$, $B_{eq}=10$\,GHz) and the
+quantum limit for $\Delta T=1/(2B_{eq})$. The markers are $\bar\imath^2/\Var\,i$ measured on the output of
+\blk{photodiode} for a CW input.}
+\label{fig:snr-receivers}
+\end{figure}
+
+\subsection{The photodiode block}
+\blk{photodiode} sums the powers of both polarizations, multiplies by $M\mathcal R$ and adds Gaussian
+noise generated over the simulated band $f_s/2$: TIA noise $\mathrm{IRND}^2f_s/2$, shot noise
+$2qM^2F(\mathcal RP+I_d)f_s/2$ with the dark current $I_d$, and the APD excess noise (McIntyre or power
+law). The receiver bandwidth then sets $B_{eq}$: with \prm{bandwidth_ghz} a fourth-order
+Bessel--Thomson response (the reference receiver of optical Ethernet) filters signal and noise,
+and the reported \code{noise_var} is scaled by its noise bandwidth $\frac1{f_s}\int|H|^2df$, so the result
+does not depend on the sample rate. With \prm{transimpedance_ohm} the output is the TIA voltage.
+\codeexcerpt{photodiode}{Square-law detection with TIA, shot and APD excess noise.}
+
+% ==================================================================
+\section{IM/DD system performance}\label{sec:imdd}
+\subsection{PAM-M with signal-independent noise}
+IM/DD systems carry the information in $M$ power levels $P_1<\dots<P_M$, equally spaced by
+$\Delta P$, with extinction ratio $\mathrm{ER}=P_M/P_1$. Then
+\begin{equation}
+  P_1=\frac{(M-1)\Delta P}{\mathrm{ER}-1},\qquad P_M=\frac{\mathrm{ER}\,(M-1)\Delta P}{\mathrm{ER}-1},\qquad
+  \bar P=\frac{\mathrm{ER}+1}{2(\mathrm{ER}-1)}(M-1)\Delta P,
+\end{equation}
+so for a given average power the level spacing is
+\begin{equation}
+  \Delta P=\frac{\mathrm{ER}-1}{\mathrm{ER}+1}\,\frac{2\bar P}{M-1}.
+\end{equation}
+The sampled current is $i_k=\mathcal RP_k+n$ with Gaussian TIA noise of variance $\sigma^2=\mathrm{IRND}^2B_{eq}$,
+the same on every level (shot noise neglected, as for PIN receivers). With thresholds half-way
+between levels, every symbol has one or two neighbours at distance $\Delta I/2=\mathcal R\Delta P/2$, and
+\begin{equation}
+  \mathrm{SER}=\frac{M-1}{M}\erfc\Big(\sqrt{\frac{\Delta I^2}{8\sigma^2}}\Big)
+  =\frac{M-1}{M}\erfc\Big(\frac{\mathcal R\bar P}{M-1}\,\frac{\mathrm{ER}-1}{\mathrm{ER}+1}\,\frac{1}{\mathrm{IRND}\sqrt{2B_{eq}}}\Big),
+  \label{eq:pam-ser}
+\end{equation}
+and with Gray labels $\mathrm{BER}\approx\mathrm{SER}/\log_2M$. For PAM-2 and PAM-4,
+\begin{equation}
+  \mathrm{BER}_{\mathrm{PAM2}}=\frac12\erfc(\gamma\bar P),\qquad \mathrm{BER}_{\mathrm{PAM4}}\approx\frac38\erfc\Big(\frac{\gamma\bar P}{3}\Big),\qquad
+  \gamma=\frac{\mathcal R}{\mathrm{IRND}}\,\frac{\mathrm{ER}-1}{\mathrm{ER}+1}\,\frac{1}{\sqrt{2B_{eq}}} .
+\end{equation}
+Below $3\times10^{-2}$ the tail $\erfc(y)\approx e^{-y^2}/(\sqrt\pi y)$ shows that the BER drops by decades within a few
+dB. \Cref{fig:pam-imdd} compares the chain \blk{intensity_modulator}$\to$\blk{photodiode}$\to$\blk{agc}$\to$\blk{demapper}
+with \cref{eq:pam-ser}. The \emph{sensitivity} is the average power at the target BER.
+\codeexcerpt{pam_ser}{IM/DD PAM-M symbol error rate (\code{theory.pam_imdd_ser}).}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[width=11cm,height=6cm,xlabel={average received power [dBm]},ylabel={BER},
+  xmin=-27,xmax=-11,ymin=1e-6,ymax=0.5,legend pos=south west]
+  \addplot[th=accent] table[x=p,y=ber2]{\datafile{pam_imdd_theory}};
+  \addplot[th=accent2] table[x=p,y=ber4]{\datafile{pam_imdd_theory}};
+  \addplot[sim=accent] table[x=p2,y=ber2]{\datafile{pam_imdd_sim}};
+  \addplot[sim={accent2,mark=square*}] table[x=p4,y=ber4]{\datafile{pam_imdd_sim}};
+  \legend{PAM-2 \cref{eq:pam-ser},PAM-4 \cref{eq:pam-ser},simulated PAM-2,simulated PAM-4}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{10\,GBd PAM-2 and PAM-4 into a PIN + TIA receiver ($\mathcal R=0.8$\,A/W, 20\,pA/$\sqrt{\mathrm{Hz}}$ over
+$f_s/2=20$\,GHz, ER\,=\,10\,dB): simulation against the course formula. PAM-4 needs 4.8\,dB more
+power at the same baud rate.}
+\label{fig:pam-imdd}
+\end{figure}
+
+\subsection{Penalties and sensitivity}\label{sec:imdd-penalties}
+\Cref{eq:pam-ser} gives the power penalties of IM/DD directly.
+\begin{itemize}
+  \item \textbf{PAM-M at the same baud rate}: the argument scales as $1/(M-1)$, so PAM-M needs
+  $10\log_{10}(M-1)$ more average power than PAM-2 (4.8\,dB for PAM-4).
+  \item \textbf{PAM-M at the same bit rate}: the baud rate and $B_{eq}$ drop by $n_{\mathrm{bit}}=\log_2M$, so the
+  penalty is $10\log_{10}\big((M-1)/\sqrt{n_{\mathrm{bit}}}\big)$, 3.3\,dB for PAM-4. Unlike coherent formats,
+  multilevel IM/DD always costs power.
+  \item \textbf{Finite extinction ratio}: $10\log_{10}\frac{\mathrm{ER}+1}{\mathrm{ER}-1}$ relative to an infinite ER: 0.9\,dB
+  at 10\,dB, 1.4\,dB at 8\,dB, 3.7\,dB at 4\,dB. External modulators reach 10--14\,dB, DMLs less than 8\,dB.
+  \item \textbf{Bandwidth}: $P_{\mathrm{sens}}\propto\sqrt{B_{eq}}$ in theory, between $B^{0.5}$ and $B^{1.5}$ in practice.
+\end{itemize}
+
+\paragraph{The $\gamma$ approach.} Since the BER depends on $\gamma\bar P$ only, a receiver datasheet that
+quotes the sensitivity $P_{\mathrm{sens}}$ at a target BER fixes $\gamma=\eta/P_{\mathrm{sens}}$ with
+$\eta=\erfc^{-1}(2\,\mathrm{BER}_{\mathrm{sens}})$ (PAM-2), from which the BER at any power or for PAM-4 follows. Values
+of $\eta$: 2.19 at $10^{-3}$, 3.02 at $10^{-5}$, 4.24 at $10^{-9}$, 4.97 at $10^{-12}$, 5.62 at $10^{-15}$. For example a
+2.5\,Gb/s PIN receiver with $-22$\,dBm sensitivity at $10^{-9}$ has $\gamma=4.24/6.3\,\mathrm{\mu W}=672$\,mW$^{-1}$; a 10\,Gb/s
+APD receiver at $-26$\,dBm has 1688\,mW$^{-1}$. The approach is excellent for PIN + TIA receivers, crude
+for APDs (signal-dependent noise) and wrong for optically pre-amplified receivers, where ASE
+beat noise dominates.
+
+\subsection{Bandwidth limitations and equalization}
+When the end-to-end bandwidth falls below about half the bit rate, inter-symbol interference
+closes the eye. With a fourth-order Bessel receiver, $B_{3\mathrm{dB}}=0.9R_B$ is practically perfect,
+$0.6R_B$ (the SONET reference filter) is good, $0.3R_B$ halves the eye opening (3\,dB penalty).
+Commercial optoelectronic bandwidths are 20--25\,GHz (40--50\,GHz in research), so 50--100\,GBd
+links need adaptive equalization after the TIA: a feed-forward FIR filter (\blk{lms_equalizer},
+\cref{ch:fading}) reduces the ISI at the cost of noise enhancement, and a decision-feedback
+equalizer (\blk{dfe_equalizer}) cancels post-cursors without it.
+
+\subsection{Power budget}
+The power available for losses is $L_{\mathrm{avail}}=P_{TX,\mathrm{dBm}}-P_{\mathrm{sens,dBm}}$. It must cover the fiber, the
+splices (0.05--0.2\,dB each), the connectors (0.1--0.5\,dB), bends, the propagation penalties of
+dispersion and nonlinearity, and a system margin of 1--6\,dB for ageing and repairs:
+\begin{equation}
+  P_{TX}-P_{\mathrm{sens}}\ge\alpha_{\mathrm{dB}}L+\sum A_{\mathrm{splice}}+\sum A_{\mathrm{conn}}+A_{\mathrm{penalties}}+\mu .
+\end{equation}
+For example a 2.5\,Gb/s link with 0\,dBm, $-22$\,dBm sensitivity, 0.25\,dB/km, a 0.1\,dB splice every
+2\,km, four 0.4\,dB connectors, 2\,dB of bends, 0.25\,dB of penalties and 6\,dB of margin reaches
+40.5\,km. Passive components enter the budget too: a $1\times N$ splitter divides the power by $N$
+times an excess loss, $A_{\mathrm{dB}}=10\log_{10}N+\epsilon_{\mathrm{dB}}$ (passive optical networks work around
+$-25$\,dBm); a 100\,GHz WDM demultiplexer has up to 2.5\,dB insertion loss, 26\,dB adjacent and 35\,dB
+non-adjacent isolation. \blk{optical_attenuator} models a variable attenuator, a splitter
+(\prm{split_ways}, \prm{excess_loss_db}) or a connector loss; \blk{fiber} has
+\prm{connector_loss_db} at its input.
+
+\subsection{FEC in IM/DD}
+A Reed--Solomon RS(255,239) code (7\,\% overhead) turns a pre-FEC BER of $10^{-4}$ into about $10^{-14}$;
+modern hard- and soft-decision FECs accept $3.8\times10^{-3}$ to $2\times10^{-2}$. Because the electrical SNR of
+IM/DD is proportional to the \emph{square} of the optical power, the optical coding gain is
+$10\log_{10}(\eta_{\mathrm{noFEC}}/\eta_{\mathrm{FEC}})$, half the electrical one: from $10^{-15}$ to $3.8\times10^{-3}$ it is
+4.7\,dB optical, while an AWGN channel would gain $20\log_{10}$ of the same ratio, 9.5\,dB.
+
+\subsection{The quantum limit of OOK}
+An ideal photon counter decides "1" on the arrival of at least one photon. With $P_0=0$ errors
+happen only when a "1", carrying on average $N_1=2\bar P/(hfR_B)$ photons, delivers none:
+\begin{equation}
+  \mathrm{BER}=\frac12e^{-N_1}=\frac12\exp\Big(-\frac{2\bar P}{hfR_B}\Big).
+\end{equation}
+$10^{-15}$ needs $N_1=34$, about 17 photons per bit on average; $10^{-2}$ only two. Real receivers are
+20--30\,dB away, except SPAD receivers at very low rates.
+
+\subsection{Chromatic dispersion in IM/DD}\label{sec:imdd-cd}
+Dispersion acts linearly on the field, $E_{Rx}(f)=E_{Tx}(f)H_F(f)$, but the photodiode detects
+$|E_{Rx}(t)|^2$: the end-to-end IM/DD channel is \emph{nonlinear} and cannot be equalized exactly, unlike
+the coherent channel where the DSP inverts $H_F$. The course uses a heuristic criterion for
+chirp-free PAM-2: the eye is acceptable while the differential group delay within the signal
+spectrum stays below half a bit slot,
+\begin{equation}
+  |\Delta\tau_g|=|D|L\Delta\lambda\le\frac{T_B}{2}=\frac{1}{2R_B},\qquad \Delta\lambda=\frac{\lambda^2}{c}\Delta f,\qquad
+  \Delta f\approx\frac23R_B,
+\end{equation}
+the last value found by simulations and experiments for NRZ. At 1550\,nm this gives the
+\emph{dispersion limit}
+\begin{equation}
+  L_{\max}=\frac{1}{10\,|D|\,R_B^2}=\frac{1}{8\,|\beta_2|\,R_B^2}
+  \qquad(R_B\ \text{in Tb/s},\ D\ \text{in ps/(nm km)},\ \beta_2\ \text{in ps}^2/\text{km},\ L\ \text{in km}).
+  \label{eq:cd-limit}
+\end{equation}
+For standard fiber ($D=16$) it is 1000\,km at 2.5\,Gb/s and 62.5\,km at 10\,Gb/s. $L_{\max}\propto1/R_B^2$:
+multiplying the bit rate by $N$ divides the reach by $N^2$ (16 for SDH steps, 100 for Ethernet
+steps). For PAM-M the bandwidth and the symbol slot follow the baud rate $R_B/n_{\mathrm{bit}}$, hence
+\begin{equation}
+  L_{\max}=\frac{n_{\mathrm{bit}}^2}{10|D|R_B^2},
+\end{equation}
+four times more for PAM-4 than PAM-2 at the same bit rate. With several fiber types only the
+accumulated dispersion counts, $|D_{\mathrm{acc}}|=|\sum D_mL_m|\le1/(10R_B^2)$ (1000\,ps/nm at 10\,Gb/s), which
+dispersion-compensating fiber can restore. The other remedies are higher-order PAM and operation
+near the zero-dispersion wavelength (O band).
+
+\Cref{fig:cd-limit} tests the criterion with noise-free simulations of \blk{intensity_modulator}
+and \blk{fiber}: the eye-opening penalty of 10 and 25\,Gb/s NRZ falls on one curve when the
+length is normalized to \cref{eq:cd-limit}, confirming the $R_B^2$ scaling, and is about 0.9\,dB at
+$L_{\max}$. PAM-4 at its own $L_{\max}$ already has a 4\,dB penalty: its eyes are a third as high, so the
+$n_{\mathrm{bit}}^2$ rule is optimistic, and a 1\,dB penalty is reached at about half that distance. As the
+course stresses, such formulas are indicative; the joint effect of power budget and dispersion
+needs simulations such as the \emph{10G OOK with a Mach--Zehnder modulator} scenario. With chirp
+(\cref{sec:chirp}) the reach is much shorter.
+\codeexcerpt{cd_comp}{Frequency-domain CD compensation, possible only with a coherent receiver.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=5.6cm,xlabel={$L/L_{\max}$},ylabel={eye-opening penalty [dB]},xmin=0,xmax=2,ymin=0,
+  ymax=8,legend pos=north west]
+  \addplot[simline=accent] table[x=x,y=ook10]{\datafile{cd_limit}};
+  \addplot[simline={accent3,mark=square*,dashed}] table[x=x,y=ook25]{\datafile{cd_limit}};
+  \addplot[simline={accent2,mark=triangle*}] table[x=x,y=pam50]{\datafile{cd_limit}};
+  \draw[black!50,densely dotted] (axis cs:1,0) -- (axis cs:1,8);
+  \legend{{10\,Gb/s NRZ, $L_{\max}=62.5$\,km},{25\,Gb/s NRZ, $L_{\max}=10$\,km},{50\,Gb/s PAM-4, $L_{\max}=10$\,km}}
+\end{axis}
+\end{tikzpicture}
+\caption{Eye-opening penalty of chirp-free IM/DD over standard fiber ($D=16$\,ps/(nm\,km), raised-cosine
+pulses, ER\,=\,15\,dB, no noise) against the length normalized to the dispersion limit.}
+\label{fig:cd-limit}
+\end{figure}
 
 % ==================================================================
 \section{Short-reach links: VCSELs and multimode fiber}\label{sec:mmf}
-Inside a data center most links are shorter than a few hundred metres. They use 850\,nm
-vertical-cavity surface-emitting lasers (VCSELs) over graded-index multimode fiber (MMF). The
-50\,\textmu m core makes coupling and connectors cheap, but it guides hundreds of modes.
-100GBASE-SR4, for example, sends four lanes of 25.78\,GBd NRZ over 70\,m of OM3 or 100\,m of
-OM4. The reach is set by dispersion, not loss. This section builds the fiber model from the
-mode theory of graded-index cores \cite{gloge1973,olshansky1976}, links it to the bandwidth
-model of the IEEE~802.3 link model \cite{cunningham2002}, and adds the transmitter and receiver
-of such a link. The blocks are \blk{vcsel} and \blk{multimode_fiber}, in
-\file{backend/linkstudio/phy/multimode.py}.
+Inside a data center most links are shorter than a few hundred metres. They use 850\,nm VCSELs
+over graded-index multimode fiber (MMF). The 50\,\textmu m core makes coupling and connectors cheap, but
+it guides hundreds of modes. 100GBASE-SR4, for example, sends four lanes of 25.78\,GBd NRZ over
+70\,m of OM3 or 100\,m of OM4; the reach is set by dispersion, not loss. This section builds the
+fiber model from the mode theory of graded-index cores~\cite{gloge1973,olshansky1976} and links it
+to the bandwidth model of the IEEE~802.3 link model~\cite{cunningham2002}. The block is
+\blk{multimode_fiber}, in \file{phy/multimode.py}; the transmitter is the \blk{vcsel} of
+\cref{sec:vcsel}.
 
 \subsection{Why the fiber acts on power}
-Write the field in the fiber as a sum of guided modes, $E(\mathbf r,t)=\sum_m a_m(t)\,\psi_m(\mathbf r)$,
-with orthonormal mode profiles, $\int\psi_m\psi_n^*\,dA=\delta_{mn}$. A photodiode that collects
-the whole core measures
+Write the field in the fiber as a sum of guided modes, $E(\mathbf r,t)=\sum_ma_m(t)\psi_m(\mathbf r)$,
+with orthonormal profiles, $\int\psi_m\psi_n^*\,dA=\delta_{mn}$. A photodiode that collects the whole core
+measures $P_{\mathrm{out}}(t)=\int|E|^2dA=\sum_m|a_m(t)|^2$: the cross terms vanish by orthogonality. Each mode
+carries a fraction $w_m$ of the launched power and arrives after its own group delay $\tau_m$, so
 \begin{equation}
-  P_{\mathrm{out}}(t)=\int|E|^2\,dA=\sum_m|a_m(t)|^2 :
-\end{equation}
-the cross terms between modes vanish by orthogonality. Each mode is excited with a fraction
-$w_m$ of the launched power and arrives after its own group delay $\tau_m$, so
-\begin{equation}
-  P_{\mathrm{out}}(t)=10^{-\alpha_{\mathrm{dB}}L/10}\sum_m w_m\,P_{\mathrm{in}}(t-\tau_m)
+  P_{\mathrm{out}}(t)=10^{-\alpha_{\mathrm{dB}}L/10}\sum_mw_m\,P_{\mathrm{in}}(t-\tau_m)
   =10^{-\alpha_{\mathrm{dB}}L/10}\,(h*P_{\mathrm{in}})(t).
   \label{eq:mmf-power}
 \end{equation}
 The fiber is a linear system for the optical \emph{power}, not for the field. Chromatic dispersion
-fits the same picture. A multimode VCSEL has a spectrum about 0.4\,nm wide (RMS, roughly
-170\,GHz), far wider than the modulation, so its spectral components add incoherently. A
-component at wavelength $\lambda$ is delayed by $D L(\lambda-\lambda_c)$, so the intensity response is
-the source spectrum mapped onto delays. For a Gaussian spectrum of RMS width $\sigma_\lambda$ this is
-a Gaussian of RMS width $|D|L\sigma_\lambda$. The total response is the modal response convolved with
-the chromatic one, $H(f)=H_{\mathrm{modal}}(f)\,H_{\mathrm{cd}}(f)$, and the variances add.
+fits the same picture. A multimode VCSEL has a spectrum about 0.4\,nm wide (RMS, roughly 170\,GHz),
+far wider than the modulation, so its spectral components add incoherently. A component at
+wavelength $\lambda$ is delayed by $DL(\lambda-\lambda_c)$, so the intensity response is the source spectrum
+mapped onto delays: for a Gaussian spectrum of RMS width $\sigma_\lambda$, a Gaussian of RMS width
+$|D|L\sigma_\lambda$. The total response is the modal response convolved with the chromatic one,
+$H(f)=H_{\mathrm{modal}}(f)H_{\mathrm{cd}}(f)$, and the variances add.
 
 \begin{keypoint}
-SMF links (\cref{sec:nlse}) propagate a coherent field and dispersion is an all-pass filter on
-the field. VCSEL--MMF links propagate incoherent power and dispersion is a low-pass filter on
-the intensity. \blk{multimode_fiber} therefore filters $|E|^2$ and rebuilds the field as
-$\sqrt{P_{\mathrm{out}}}$ with the input phase. It is meant for direct detection.
+SMF links propagate a coherent field and dispersion is an all-pass filter on the field. VCSEL--MMF
+links propagate incoherent power and dispersion is a low-pass filter on the intensity.
+\blk{multimode_fiber} therefore filters $|E|^2$ and rebuilds the field as $\sqrt{P_{\mathrm{out}}}$ with the
+input phase. It is meant for direct detection.
 \end{keypoint}
 
 \subsection{Mode groups of an $\alpha$-profile core}
-Graded-index cores follow a power law,
-$n^2(r)=n_1^2\big[1-2\Delta(r/a)^\alpha\big]$ for $r<a$, with core radius $a$, peak index $n_1$ and
-contrast $\Delta=\mathrm{NA}^2/(2n_1^2)$. For the standard 50\,\textmu m, NA\,=\,0.2 fiber,
-$\Delta=\mmfdelta$. In the WKB approximation \cite{gloge1973} the number of modes whose
-propagation constant exceeds $\beta$ is
+Graded-index cores follow a power law, $n^2(r)=n_1^2\big[1-2\Delta(r/a)^\alpha\big]$ for $r<a$, with core
+radius $a$, peak index $n_1$ and contrast $\Delta=\mathrm{NA}^2/(2n_1^2)$ ($\Delta=\mmfdelta$ for the standard 50\,\textmu m,
+NA\,=\,0.2 fiber). In the WKB approximation~\cite{gloge1973} the number of modes with propagation
+constant above $\beta$ is
 \begin{equation}
   m(\beta)=M\Big[\frac{n_1^2k^2-\beta^2}{2\Delta n_1^2k^2}\Big]^{\frac{\alpha+2}{\alpha}},\qquad
   M=\frac{\alpha}{\alpha+2}\,a^2k^2n_1^2\Delta=\frac{\alpha}{\alpha+2}\,\frac{V^2}{2},
 \end{equation}
-with $V=ka\,\mathrm{NA}$. Inverting it gives the propagation constant of the mode with label
-$m$: $\beta=n_1k\sqrt{1-2\Delta x}$, where $x=(m/M)^{\alpha/(\alpha+2)}$.
+with $V=ka\,\mathrm{NA}$. Inverting it gives $\beta=n_1k\sqrt{1-2\Delta x}$ with $x=(m/M)^{\alpha/(\alpha+2)}$.
 
-\paragraph{Group delay.} The delay per unit length is $\tau/L=c^{-1}\,d\beta/dk$. Keep $m$ fixed
-(the same mode) and note that $M\propto k^2n_1^2$. Then
-$dx/dk=-\frac{\alpha}{\alpha+2}\,x\,\frac{2N_1}{n_1k}$, with group index $N_1=d(n_1k)/dk$, and
+\paragraph{Group delay.} The delay per unit length is $\tau/L=c^{-1}d\beta/dk$. Keeping $m$ fixed and
+noting $M\propto k^2n_1^2$, $dx/dk=-\frac{\alpha}{\alpha+2}x\frac{2N_1}{n_1k}$ with group index $N_1=d(n_1k)/dk$, and
 \begin{equation}
-  \frac{d\beta}{dk}=N_1\sqrt{1-2\Delta x}+\frac{n_1k\,\Delta}{\sqrt{1-2\Delta x}}\,\frac{\alpha}{\alpha+2}\,\frac{2N_1x}{n_1k}
-  \;\Longrightarrow\;
   \tau=\frac{LN_1}{c}\;\frac{1-\frac{4\Delta x}{\alpha+2}}{\sqrt{1-2\Delta x}} .
   \label{eq:mmf-exact}
 \end{equation}
-Since $\Delta\approx0.01$, expanding to second order loses nothing. Including the profile
-dispersion $\epsilon=-\frac{2n_1}{N_1}\frac{\lambda}{\Delta}\frac{d\Delta}{d\lambda}$ gives the
-Olshansky--Keck form \cite{olshansky1976}:
+With $\Delta\approx0.01$ a second-order expansion loses nothing. Including the profile dispersion
+$\epsilon=-\frac{2n_1}{N_1}\frac{\lambda}{\Delta}\frac{d\Delta}{d\lambda}$ gives the Olshansky--Keck
+form~\cite{olshansky1976}:
 \begin{equation}
-  \frac{\tau}{LN_1/c}-1=\Delta\,C_1\,x+\Delta^2C_2\,x^2,\qquad
+  \frac{\tau}{LN_1/c}-1=\Delta C_1x+\Delta^2C_2x^2,\qquad
   C_1=\frac{\alpha-2-\epsilon}{\alpha+2},\quad C_2=\frac{3\alpha-2-2\epsilon}{2(\alpha+2)} .
   \label{eq:mmf-delay}
 \end{equation}
-With $\epsilon=0$, \cref{eq:mmf-delay} is the Taylor expansion of \cref{eq:mmf-exact}. The test
-suite checks that the two agree to $\mathcal O(\Delta^3)$.
+With $\epsilon=0$ it is the Taylor expansion of \cref{eq:mmf-exact}; the test suite checks the agreement
+to $\mathcal O(\Delta^3)$.
 
 \paragraph{Overfilled RMS width and the optimum profile.} If every mode carries the same power,
-$u=m/M$ is uniform on $[0,1]$. Then $x=u^q$ with $q=\alpha/(\alpha+2)$ has moments
-$\mathbb E[x^k]=1/(kq+1)$, and the RMS spread of \cref{eq:mmf-delay} follows in closed form:
+$u=m/M$ is uniform and $x=u^q$, $q=\alpha/(\alpha+2)$, has moments $\E[x^k]=1/(kq+1)$, so
 \begin{equation}
-  \frac{\sigma_\tau}{LN_1/c}=\Delta\Big[C_1^2\operatorname{Var}x+2\Delta C_1C_2\operatorname{Cov}(x,x^2)+\Delta^2C_2^2\operatorname{Var}x^2\Big]^{1/2}.
+  \frac{\sigma_\tau}{LN_1/c}=\Delta\Big[C_1^2\Var x+2\Delta C_1C_2\operatorname{Cov}(x,x^2)+\Delta^2C_2^2\Var x^2\Big]^{1/2}.
 \end{equation}
-The leading term vanishes for $\alpha=2+\epsilon$. Minimizing the whole expression gives
-\cite{olshansky1976}
+The leading term vanishes for $\alpha=2+\epsilon$; minimizing the whole expression gives~\cite{olshansky1976}
 \begin{equation}
   \alpha_{\mathrm{opt}}=2+\epsilon-\Delta\frac{(4+\epsilon)(3+\epsilon)}{5+2\epsilon},\qquad
   \sigma_{\min}\approx\frac{LN_1\Delta^2}{20\sqrt3\,c},
 \end{equation}
-that is $\alpha_{\mathrm{opt}}=\mmfalphaopt$ and $\sigma_{\min}=\mmfsigmamin$\,ps/km for our fiber.
-A parabolic core ($\alpha=2$) is already five times worse. A profile error of only $\pm0.01$ in
-$\alpha$ multiplies the spread by two to three (\cref{fig:mmf-profile}). This sensitivity is why
-real fibers are graded by measured bandwidth rather than by profile.
+$\alpha_{\mathrm{opt}}=\mmfalphaopt$ and $\sigma_{\min}=\mmfsigmamin$\,ps/km for this fiber. A parabolic core ($\alpha=2$) is five
+times worse, and a profile error of $\pm0.01$ multiplies the spread by two or three
+(\cref{fig:mmf-profile}): real fibers are therefore graded by measured bandwidth.
 
-\paragraph{Discrete groups.} Modes with equal principal mode number are degenerate and travel
-together. A core holds about $G=\sqrt M$ such groups: \mmfgroups{} for OM4 at 850\,nm. Group
-$\mu$ ($\mu=1\dots G$) holds the $2\mu-1$ modes between $u=((\mu-1)/G)^2$ and $(\mu/G)^2$. The
-block evaluates \cref{eq:mmf-delay} at the group centre and removes the mean delay, so the
-response does not include the bulk latency.
+\paragraph{Discrete groups.} Modes with equal principal mode number are degenerate. A core holds
+about $G=\sqrt M$ groups (\mmfgroups{} for OM4 at 850\,nm); group $\mu$ holds the $2\mu-1$ modes between
+$u=((\mu-1)/G)^2$ and $(\mu/G)^2$. The block evaluates \cref{eq:mmf-delay} at the group centre and
+removes the mean delay.
 \codeexcerpt{mmf_delay}{Group delay of \cref{eq:mmf-delay}.}
 \codeexcerpt{mmf_groups}{Group delays and launch weights.}
 
@@ -508,33 +1357,28 @@ response does not include the bulk latency.
   \legend{continuum theory,\blk{multimode_fiber} groups}
 \end{groupplot}
 \end{tikzpicture}
-\caption{Left: delays of the mode groups over 1\,km for the optimum profile, the default OM4
-and OM3 profiles and a parabolic core. Right: overfilled RMS width against $\alpha$. The line is
-the continuum moment formula; the markers are the discrete-group block. The 18--19 groups follow
-the theory closely except near $\alpha_{\mathrm{opt}}$, where the residual spread is set by the
-discreteness of the groups.}
+\caption{Left: mode-group delays over 1\,km for the optimum profile, the default OM4 and OM3
+profiles and a parabolic core. Right: overfilled RMS width against $\alpha$: continuum formula and
+discrete-group block.}
 \label{fig:mmf-profile}
 \end{figure}
 
 \subsection{Launch conditions}
-The power distribution $w_\mu$ depends on how light enters the fiber.
+The power distribution $w_\mu$ depends on the launch.
 \begin{itemize}
-  \item \textbf{Overfilled launch} (every mode equally): $w_\mu\propto2\mu-1$. It excites the
-  outer groups strongly. The \emph{overfilled launch} (OFL) bandwidth is defined with it.
-  \item \textbf{Gaussian beam} (\prm{launch}\code{=gaussian}). In a parabolic core the modes are
-  the Hermite--Gauss modes of a two-dimensional harmonic oscillator, with fundamental field
-  radius $w_0=\sqrt{a\lambda/(\pi\,\mathrm{NA})}\approx5.8$\,\textmu m. Group $p=\mu-1$ collects
-  the modes with $n_x+n_y=p$. A beam of radius $w$ displaced by $r_0$ along $x$ separates into
-  $x$ and $y$ factors, so the group powers follow from one-dimensional overlap integrals,
-  computed numerically in the block.
+  \item \textbf{Overfilled launch} (every mode equally): $w_\mu\propto2\mu-1$, the definition of the
+  overfilled-launch (OFL) bandwidth.
+  \item \textbf{Gaussian beam} (\prm{launch}\code{=gaussian}). In a parabolic core the modes are the
+  Hermite--Gauss modes of a two-dimensional harmonic oscillator with fundamental field radius
+  $w_0=\sqrt{a\lambda/(\pi\,\mathrm{NA})}\approx5.8$\,\textmu m; group $p=\mu-1$ collects the modes with $n_x+n_y=p$, and a
+  beam of radius $w$ displaced by $r_0$ separates into $x$ and $y$ overlap integrals.
 \end{itemize}
-Two cases have exact closed forms and serve as checks (\cref{fig:mmf-launch}):
-\begin{itemize}
-  \item a matched beam ($w=w_0$) displaced by $r_0$ is a coherent state of the oscillator, so the
-  group powers are Poisson distributed with mean $r_0^2/w_0^2$;
-  \item a centred beam of the wrong size is a squeezed state, which excites only even groups,
-  with geometric weights $(1-t)\,t^{p/2}$, $t=\big((w^2-w_0^2)/(w^2+w_0^2)\big)^2$.
-\end{itemize}
+Two exact cases check the computation (\cref{fig:mmf-launch}): a matched beam displaced by $r_0$ is a
+coherent state, with Poisson group powers of mean $r_0^2/w_0^2$; a centred beam of the wrong size is a
+squeezed state, which excites only even groups with weights $(1-t)t^{p/2}$,
+$t=\big((w^2-w_0^2)/(w^2+w_0^2)\big)^2$. A centred launch puts the power in the low groups, which travel
+close together: this is why the effective modal bandwidth (EMB) of VCSEL links exceeds the OFL
+bandwidth (\cref{tab:om}).
 \codeexcerpt{mmf_launch}{Gaussian-beam coupling into the principal mode groups.}
 
 \begin{figure}[htbp]
@@ -553,23 +1397,14 @@ Two cases have exact closed forms and serve as checks (\cref{fig:mmf-launch}):
   \legend{$(1-t)\,t^{p/2}$,block}
 \end{groupplot}
 \end{tikzpicture}
-\caption{Mode-group powers computed by \code{gaussian_launch_weights} against the coherent-state
-(left) and squeezed-state (right) closed forms.}
+\caption{Mode-group powers from \code{gaussian_launch_weights} against the coherent-state (left)
+and squeezed-state (right) closed forms.}
 \label{fig:mmf-launch}
 \end{figure}
 
-A centred launch puts almost all the power in the lowest groups, which travel close together.
-This is why a restricted launch gives a much higher bandwidth than the overfilled one, and why
-the \emph{effective modal bandwidth} (EMB) used for VCSEL links exceeds the OFL bandwidth
-(\cref{tab:om}).
-
 \subsection{Fiber classes and the bandwidth model}
-Fiber classes are specified by bandwidth--length products rather than by profile
-(\cref{tab:om}).
-
 \begin{table}[htbp]
-\centering
-\small
+\centering\small
 \caption{Multimode fiber classes at 850\,nm (ISO/IEC~11801, TIA-568.3, IEC~60793-2-10) as used by
 \blk{multimode_fiber}.}
 \label{tab:om}
@@ -586,77 +1421,36 @@ OM5 & 50 & 0.200 & 3500 & 4700 & 3.5\\
 \end{tabular}
 \end{table}
 
-\paragraph{Gaussian bandwidth model} (\prm{model}\code{=bandwidth}, the default). The IEEE~802.3
-link model \cite{cunningham2002} assumes Gaussian responses. For
-$H(f)=\exp(-2\pi^2\sigma^2f^2)$ the 3-dB optical bandwidth satisfies $H(B)=\frac12$, hence
-\begin{equation}
-  B\,\sigma=\frac{\sqrt{\ln2/2}}{\pi}\approx0.187 .
-\end{equation}
-The modal width over a length $L$ is $\sigma_{\mathrm{modal}}=0.187\,L/\mathrm{EMB}$ (linear length
-scaling, as in the link model). The chromatic width uses the dispersion of the fiber at the
-source wavelength, $D_1=\frac{S_0\lambda}{4}\big(1-(\lambda_0/\lambda)^4\big)$, about
-$-100$\,ps/(nm\,km) at 850\,nm for $\lambda_0=1320$\,nm and $S_0=0.101$\,ps/(nm$^2$\,km). It adds a
-second-order term $D_2=0.7S_0\sigma_\lambda$ for the spectral width:
-\begin{equation}
-  \sigma_{\mathrm{cd}}=L\,\sigma_\lambda\sqrt{D_1^2+D_2^2}.
-\end{equation}
+\paragraph{Gaussian bandwidth model} (\prm{model}\code{=bandwidth}, the default). The IEEE~802.3 link
+model assumes Gaussian responses: for $H(f)=\exp(-2\pi^2\sigma^2f^2)$, $H(B)=\frac12$ gives
+$B\sigma=\sqrt{\ln2/2}/\pi\approx0.187$. The modal width is $\sigma_{\mathrm{modal}}=0.187\,L/\mathrm{EMB}$. The chromatic width
+uses the dispersion at the source wavelength, $D_1=\frac{S_0\lambda}{4}\big(1-(\lambda_0/\lambda)^4\big)$ (about
+$-100$\,ps/(nm\,km) at 850\,nm), plus a spectral-width term $D_2=0.7S_0\sigma_\lambda$:
+$\sigma_{\mathrm{cd}}=L\sigma_\lambda\sqrt{D_1^2+D_2^2}$.
 \codeexcerpt{mmf_chromatic}{Chromatic RMS width of the IEEE~802.3 link model.}
 
-\paragraph{Mode-group model} (\prm{model}\code{=mode_groups}). The response is the sum of
-delayed impulses of \cref{eq:mmf-power}, multiplied by the Gaussian chromatic response.
-Without an explicit \prm{alpha}, the block detunes the profile from $\alpha_{\mathrm{opt}}$ until
-the overfilled RMS width of the discrete groups equals $0.187/\mathrm{OFL}$. The result is
-$\alpha=\mmfalphaomfour$ for OM4 and $\alpha=\mmfalphaomthree$ for OM3. The fiber then meets its
-class specification by construction, and the launch options show how far a real transmitter
-improves on the overfilled launch.
+\paragraph{Mode-group model} (\prm{model}\code{=mode_groups}). The response is the sum of delayed
+impulses of \cref{eq:mmf-power} times the Gaussian chromatic response. Without an explicit
+\prm{alpha}, the block detunes the profile until the overfilled RMS width of the groups equals
+$0.187/\mathrm{OFL}$: $\alpha=\mmfalphaomfour$ for OM4 and $\mmfalphaomthree$ for OM3. The fiber then meets its class by
+construction, and the launch options show how much a real transmitter improves on it.
 \codeexcerpt{mmf_response}{Power transfer function of the fiber.}
-
-\begin{incode}
-The spectral width comes from the \code{spectral_width_nm} metadata set by \blk{vcsel}, or from
-\prm{source_rms_width_nm}. Filtering uses \code{apply_frequency_response} on $|E|^2$. Dual
-polarization inputs are summed into one intensity. The metrics report the modal and chromatic
-RMS widths, the resulting Gaussian-equivalent bandwidth and, for a Gaussian launch, the fraction
-of power coupled into guided modes (also applied as a loss).
-\end{incode}
-
-\subsection{VCSEL transmitter and reference receiver}
-Linearizing the laser rate equations around the bias point gives the small-signal modulation
-response of a semiconductor laser, a damped second-order resonance. The RC parasitics of the
-chip add a pole \cite{coldren2012}:
-\begin{equation}
-  H(f)=\frac{f_r^2}{f_r^2-f^2+jf\gamma/(2\pi)}\cdot\frac{1}{1+jf/f_p},
-\end{equation}
-with relaxation-oscillation frequency $f_r$, damping rate $\gamma$ and parasitic frequency $f_p$.
-Without parasitics and with weak damping the 3-dB bandwidth tends to $\sqrt{1+\sqrt2}\,f_r\approx1.55f_r$,
-a limit the test suite checks. The default 25G-class device ($f_r=20$\,GHz,
-$\gamma=100$\,ns$^{-1}$, $f_p=20$\,GHz) has a bandwidth of 22.6\,GHz. \blk{vcsel} normalizes and
-filters the drive, maps it to power with the extinction ratio (4\,dB by default, typical of
-VCSELs), clips negative power (the laser stops emitting below threshold) and adds RIN. The group
-delay of $H$ at DC is added to the \code{delay} metadata, so the receiver samples at the eye
-centre.
-\codeexcerpt{vcsel_response}{Small-signal VCSEL response.}
-
-Optical Ethernet specifies receivers through a reference response: a fourth-order
-Bessel--Thomson low-pass at $0.75R_s$. \blk{photodiode} applies it when \prm{bandwidth_ghz} is set.
-The filter acts on signal and noise. The reported \code{noise_var} is scaled by the noise
-bandwidth of the filter, $\frac1{f_s}\int|H|^2df$, so the result no longer depends on the
-simulation sample rate.
 
 \subsection{A 25G data-center lane}
 The \emph{25G VCSEL multimode data-center link} scenario chains \blk{pulse_shaper} (NRZ),
-\blk{vcsel}, \blk{multimode_fiber}, \blk{photodiode} (0.75$R_s$ Bessel--Thomson) and \blk{agc},
-followed by the decision. \Cref{fig:mmf-eyes} shows the received eyes. At 100\,m of OM4 the
-fiber hardly matters: the eye shows the VCSEL ringing and the receiver filter. At 300\,m the
-modal and chromatic widths grow to about 12\,ps each, about a third of the 38.8\,ps symbol, and
-the eye starts closing. OM3 at 300\,m, with an EMB less than half that of OM4, closes it. The
-test suite checks that BER is below $10^{-3}$ for OM4 at 100\,m and above $10^{-2}$ for OM3 at
+\blk{vcsel} (7\,mA bias, $\pm3$\,mA), a 6\,dB coupling loss, \blk{multimode_fiber}, \blk{photodiode} with
+the reference receiver (0.75$R_s$ Bessel--Thomson) and \blk{agc}. \Cref{fig:mmf-eyes} shows the
+received eyes. At 100\,m of OM4 the fiber hardly matters: the eye shows the VCSEL relaxation
+ringing and the receiver filter. At 300\,m the modal and chromatic widths grow to about 12\,ps each,
+a third of the 38.8\,ps symbol, and the eye starts closing; OM3 at 300\,m, with less than half the
+EMB, closes it. The test suite checks BER below $10^{-3}$ for OM4 at 100\,m and above $10^{-2}$ for OM3 at
 300\,m.
 
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}
 \begin{groupplot}[group style={group size=3 by 1,horizontal sep=6mm,y descriptions at=edge left},
-  width=5.3cm,height=4.6cm,xmin=-1,xmax=1,ymin=0.05,ymax=0.4,xlabel={$t/T$},xtick={-1,0,1}]
+  width=5.3cm,height=4.6cm,xmin=-1,xmax=1,xlabel={$t/T$},xtick={-1,0,1}]
 \nextgroupplot[title={OM4, 100\,m},ylabel={photocurrent [mA]}]
   \addplot[accent,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_om4_100}};
 \nextgroupplot[title={OM4, 300\,m}]
@@ -665,20 +1459,712 @@ test suite checks that BER is below $10^{-3}$ for OM4 at 100\,m and above $10^{-
   \addplot[accent2,very thin,opacity=0.5] table[x=x,y=y]{\datafile{eye_om3_300}};
 \end{groupplot}
 \end{tikzpicture}
-\caption{Received eyes of the data-center lane (25.78\,GBd NRZ, $-4$\,dBm VCSEL, 16 samples per
+\caption{Received eyes of the data-center lane (25.78\,GBd NRZ, rate-equation VCSEL, 16 samples per
 symbol, RIN off for clarity), cut from the \blk{photodiode} output.}
 \label{fig:mmf-eyes}
 \end{figure}
 
 \begin{pitfall}[What the multimode model leaves out]
 The IEEE link model also budgets mode-partition noise (the VCSEL modes fluctuate in power while
-the total stays constant, which dispersion turns into noise) and modal noise (speckle filtered
-by connector offsets). Neither is modelled yet. The mode-group model also ignores the coupling
-between modal and chromatic dispersion (each group has its own wavelength dependence
-\cite{golowich2003}), differential mode attenuation and mode coupling. These effects are small for
-the short, well-made links the classes describe. Statistically realistic fibers would need DMD
+the total stays constant, which dispersion turns into noise) and modal noise (speckle filtered by
+connector offsets); neither is modelled. The mode-group model ignores the coupling between modal
+and chromatic dispersion (each group has its own wavelength dependence~\cite{golowich2003}),
+differential mode attenuation and mode coupling. Statistically realistic fibers would need DMD
 templates measured according to IEC~60793-1-49.
 \end{pitfall}
+
+% ==================================================================
+\section{Optical amplifiers}\label{sec:amplifiers}
+Optical amplifiers amplify the light directly, without conversion to the electrical domain,
+and are fiber-pigtailed so they can be inserted anywhere in a link. Commercial since about
+1990, they made multi-span links of thousands of kilometres possible. Three types are used:
+erbium-doped fiber amplifiers (EDFAs), semiconductor optical amplifiers (SOAs) and Raman
+amplifiers (\cref{sec:raman}).
+
+\subsection{Erbium-doped fiber amplifiers}
+The core of a 5--30\,m fiber is doped with Er$^{3+}$ ions (100--1000\,ppm), a quasi three-level system.
+A pump laser at 980\,nm lifts electrons from the ground level $E_1$ to the pump band $E_3$, from
+which they decay in about 1\,\textmu s to the metastable level $E_2$; its long lifetime
+($\tau_{21}\approx8$--12\,ms) lets the population of $E_2$ build up until it is inverted with respect to
+$E_1$. The $E_2\to E_1$ transition matches 1530--1570\,nm, so C-band signal photons are amplified by
+stimulated emission. Pumping at 1480\,nm excites the top of the $E_2$ manifold directly. The levels
+are broadened by the glass host (Stark splitting), so the gain covers the whole C band (and, with
+longer fibers, the L band), with a peak near 1530\,nm. A basic EDFA has an isolator, a WDM coupler
+that adds the pump, the doped fiber, a coupler that removes the residual pump and an output
+isolator; commercial units add several stages, counter-propagating pumps, gain-flattening filters
+(GFF), power monitors, a spectrum analyzer and a control CPU.
+
+\subsection{Semiconductor optical amplifiers}
+An SOA is a laser chip without feedback: the current injected into a forward-biased junction
+creates the inversion. It is cheap, small, integrable and can cover the O to L bands, but has a
+higher noise figure (7--8\,dB), polarization dependence and fast carrier dynamics (ns), which cause
+cross-gain modulation and four-wave mixing between WDM channels. SOAs are used as single-channel
+boosters and preamplifiers and for switching and wavelength conversion.
+
+\subsection{System model and ASE noise}
+On the field, an amplifier of power gain $G$ is linear (below saturation) and adds noise:
+\begin{equation}
+  \vect E_{\mathrm{out}}(t)=\sqrt G\,\vect E_{\mathrm{in}}(t)+\vect n(t).
+\end{equation}
+The noise is amplified spontaneous emission (ASE), emitted on both polarizations. After gain
+flattening it is white and Gaussian on all four quadratures,
+$\vect n=(n_{Rx}+jn_{Ix})\hat x+(n_{Ry}+jn_{Iy})\hat y$, each with power spectral density $N_0/2$,
+\begin{equation}
+  N_0=hf\,(G-1)\,n_{sp},
+\end{equation}
+where $n_{sp}\ge1$ is the spontaneous emission (inversion) factor. System specifications use the noise
+figure $F=2n_{sp}$, so the quantum limit is $F\ge2$ (3\,dB). Very good C-band EDFAs have 4.5--5\,dB
+($n_{sp}=1.4$--1.6), cheaper ones 5--6\,dB, L-band EDFAs about 1\,dB more, SOAs 7--8\,dB. The ASE power in a
+bandwidth $B$ (both polarizations, four quadratures) is
+\begin{equation}
+  P_{\mathrm{ASE}}=4\cdot\frac{N_0}{2}B=2N_0B=hf\,(G-1)\,F\,B .
+\end{equation}
+The density per polarization of the complex envelope is $S_{\mathrm{ASE}}=N_0$; this is the quantity carried
+in \meta{ase_psd}. (The exact quantum-optical definition, $F=2n_{sp}(G-1)/G+1/G$, coincides with
+$F=2n_{sp}$ at high gain; LinkStudio follows the course definition.)
+\codeexcerpt{ase}{ASE density per polarization, $n_{sp}=F/2$.}
+\codeexcerpt{add_ase}{ASE as circular Gaussian noise in the simulated bandwidth.}
+
+\subsection{OSNR of one amplifier}
+The generalized signal-to-noise ratio GSNR is the ratio of the signal power to all the noise
+added by the link (ASE, nonlinear interference); when only ASE counts it is the \emph{optical} SNR,
+\begin{equation}
+  \mathrm{OSNR}=\frac{P_{\mathrm{sig}}}{P_{\mathrm{ASE}}}=\frac{G\,P_{\mathrm{in}}}{hf\,B\,(G-1)\,F}\approx\frac{P_{\mathrm{in}}}{hf\,B\,F}\quad(G\gg1).
+\end{equation}
+At high gain the OSNR does not depend on $G$, only on the input power and the noise figure: the
+amplifier behaves like an input-referred noise source $P_{\mathrm{ASE,in}}\approx hfFB$, the \emph{noise floor}, about
+$-58$\,dBm in 0.1\,nm (12.5\,GHz) or $-48.9$\,dBm in 100\,GHz, plus $F_{\mathrm{dB}}$. Hence the "58\,dB rule"
+\begin{equation}
+  \mathrm{OSNR}_{0.1\,\mathrm{nm,dB}}\approx58+P_{\mathrm{in,dBm}}-F_{\mathrm{dB}} .
+  \label{eq:osnr58}
+\end{equation}
+To keep a high OSNR the signal must not fall too close to the floor before it is amplified. The
+simulator reports the OSNR both in 0.1\,nm (\code{osnr_db}) and in $B=R_s$ (\code{osnr_rs_db}), the
+reference bandwidth of coherent systems.
+
+\paragraph{Gain saturation.} The gain of a real amplifier depends on the total input power. For a
+homogeneously broadened amplifier with small-signal gain $G_0$ and saturation power $P_{\mathrm{sat}}$,
+\begin{equation}
+  G=G_0\exp\Big(-\frac{(G-1)P_{\mathrm{in}}}{P_{\mathrm{sat}}}\Big),
+\end{equation}
+solved numerically when \prm{saturation_power_dbm} is set. EDFAs saturate on the average power
+(their ms lifetime ignores the bits); in long chains working at constant total output power, the
+accumulated ASE steals gain from the signal, which then decays along the link (the "droop" effect).
+\codeexcerpt{amp_sat}{Saturated gain.}
+
+\blk{optical_amplifier} works in \code{gain} mode (fixed or saturated gain) or \code{power} mode (output
+power held at \prm{target_power_dbm}) and reports the OSNR and the gain.
+
+% ==================================================================
+\section{Multi-span links and the OSNR}\label{sec:multispan}
+Long-haul links are chains of spans, each a stretch of fiber followed by an amplifier. The
+analysis below refers to the power of one WDM channel, uses $B=R_s$ as noise bandwidth and counts
+only ASE. Let span $i$ have loss $A_i<1$ (fiber and lumped losses) and amplifier gain $G_i$ and noise
+figure $F_i$, with $P_{Tx}$ launched into the first span. The ASE of amplifier $i$ is amplified and
+attenuated by all the following spans, so at the receiver
+\begin{equation}
+  P_{\mathrm{ASE,tot}}=hfB\sum_{i=1}^{M}\Big[F_i(G_i-1)\prod_{j=i+1}^{M}G_jA_j\Big],\qquad
+  P_{Rx}=P_{Tx}\prod_{k=1}^{M}A_kG_k,
+\end{equation}
+and $\mathrm{OSNR}=P_{Rx}/P_{\mathrm{ASE,tot}}$.
+
+\paragraph{Transparent spans.} If every amplifier compensates exactly the loss of its span,
+$G_iA_i=1$, the products are 1, the launch power into every span is $P_{Tx}$ and
+\begin{equation}
+  \mathrm{OSNR}=\frac{P_{Tx}}{hfB\sum_iF_i(G_i-1)} .
+\end{equation}
+With identical spans,
+\begin{equation}
+  \mathrm{OSNR}=\frac{P_{Tx}}{M\,hfBF(G-1)}\approx\frac{A\,P_{Tx}}{M\,hfBF}=\frac{P_{\mathrm{in,EDFA}}}{M\,hfBF}:
+  \label{eq:osnr-identical}
+\end{equation}
+the signal is restored after every span while the ASE accumulates linearly, so the OSNR falls as
+$1/M$: $-3$\,dB for every doubling of the number of spans (or of the length at fixed span length).
+This mild scaling is what makes transoceanic links possible.
+
+\paragraph{Non-transparent spans.} With identical spans but $GA\ne1$ the power drifts as $(AG)^M$ and
+\begin{equation}
+  P_{\mathrm{ASE}}=hfBF(G-1)\frac{1-(AG)^M}{1-AG},\qquad
+  \mathrm{OSNR}=\frac{P_{Tx}}{hfBF(G-1)}\,\frac{(AG)^M(1-AG)}{1-(AG)^M}.
+\end{equation}
+\blk{optical_link} uses transparent spans by default and a fixed gain with
+\prm{amplifier_gain_db}; \cref{fig:osnr-spans} shows both against the formulas.
+
+\paragraph{The course exercise.} A 3000\,km link of 40 spans of 75\,km (0.2\,dB/km, so $A=-15$\,dB and
+$G=15$\,dB), EDFAs with $F=5$\,dB, 0\,dBm per channel at 1550\,nm and $B=R_s=64$\,GHz. After the first span
+$\mathrm{OSNR}_1=\osnrfirst$\,dB; after 40 spans $\mathrm{OSNR}_{40}=\mathrm{OSNR}_1-10\log_{10}40=\osnrforty$\,dB. A 64\,GBd PM-16QAM
+transceiver needs about 14\,dB, so the link works with 1\,dB of margin, and could grow to
+$10^{(31-14)/10}\approx50$ spans (3750\,km). Margin can be created with shorter spans, lower-loss fiber,
+better amplifiers, more launch power (up to the nonlinear limit of \cref{sec:gn}) or a lower symbol
+rate. The \emph{3000\,km PM-16QAM OSNR budget} scenario runs this link end to end.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogxaxis}[width=11cm,height=5.6cm,xlabel={number of spans $M$},ylabel={OSNR in $B=R_s$ [dB]},
+  xmin=0.8,xmax=70,ymin=5,ymax=33,legend pos=south west]
+  \addplot[th=accent] table[x=spans,y=transparent]{\datafile{osnr_spans_theory}};
+  \addplot[th=accent2] table[x=spans,y=gain]{\datafile{osnr_spans_theory}};
+  \addplot[sim=accent] table[x=spans,y=sim]{\datafile{osnr_spans}};
+  \addplot[sim={accent2,mark=square*}] table[x=spans,y=sim_gain]{\datafile{osnr_spans}};
+  \legend{{transparent, \cref{eq:osnr-identical}},{$G=14.8$\,dB ($GA=-0.2$\,dB)},\blk{optical_link} transparent,\blk{optical_link} fixed gain}
+\end{semilogxaxis}
+\end{tikzpicture}
+\caption{OSNR of the course exercise (75\,km spans, 0.2\,dB/km, $F=5$\,dB, 0\,dBm, $R_s=64$\,GBd) against the
+number of spans, for transparent spans and for amplifiers 0.2\,dB short of the span loss. The block
+metric equals the formulas.}
+\label{fig:osnr-spans}
+\end{figure}
+
+\paragraph{Span length.} For a fixed total length $L_{\mathrm{tot}}$ divided into $M$ spans, $G=10^{\alpha_{\mathrm{dB}}L_{\mathrm{tot}}/(10M)}$
+falls exponentially while $M$ grows linearly. As $M\to\infty$,
+$M(G-1)\to\ln(10)\alpha_{\mathrm{dB}}L_{\mathrm{tot}}/10=\alpha_{Np}L_{\mathrm{tot}}$ (the total loss in nepers), and
+\begin{equation}
+  \mathrm{OSNR}_{\mathrm{distrib}}=\frac{P_{Tx}}{hfR_sF\,\alpha_{Np}L_{\mathrm{tot}}},
+\end{equation}
+the limit of ideal distributed amplification: $\osnrdistributed$\,dB for 1000\,km at 0\,dBm, $F=5$\,dB and
+$B=100$\,GHz. Long spans lose OSNR quickly: 100\,km spans are about 12\,dB below the limit, 200\,km spans
+more than 30\,dB (\cref{fig:osnr-span-length}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=5.4cm,xlabel={span length [km]},ylabel={OSNR in 100\,GHz [dB]},xmin=0,xmax=200,
+  ymin=-6,ymax=30,legend pos=south west]
+  \addplot[th=accent] table[x=ls,y=osnr]{\datafile{osnr_span_length_theory}};
+  \addplot[sim=accent2] table[x=ls,y=sim]{\datafile{osnr_span_length}};
+  \draw[black!50,dashed] (axis cs:0,\osnrdistributed) -- (axis cs:200,\osnrdistributed)
+    node[pos=0.7,above,font=\scriptsize]{distributed limit};
+  \legend{identical transparent spans,\blk{optical_link}}
+\end{axis}
+\end{tikzpicture}
+\caption{OSNR of a 1000\,km link (0\,dBm, $F=5$\,dB) against the span length.}
+\label{fig:osnr-span-length}
+\end{figure}
+
+\paragraph{From OSNR to $E_s/N_0$.} For a coherent receiver whose noise is the ASE, the density per
+polarization is $N_0=S_{\mathrm{ASE}}$ and the signal power per polarization is $P/p$ for $p$ polarizations:
+\begin{equation}
+  \frac{E_s}{N_0}=\frac{P/p}{S_{\mathrm{ASE}}R_s}=\mathrm{OSNR}_{0.1\,\mathrm{nm}}\cdot\frac{2B_{\mathrm{ref}}}{p\,R_s}
+  =\mathrm{OSNR}_{B=R_s}\quad(p=2),
+\end{equation}
+implemented as \code{osnr_to_esn0_db}. The OSNR in $B=R_s$ of a dual-polarization signal is thus
+directly the constellation SNR of \cref{sec:coherent-snr}.
+
+\begin{incode}
+\blk{optical_link} repeats, for each span: lumped loss $A_{\mathrm{pre}}$ (\prm{connector_loss_db}), fiber
+propagation (linear FFT or split-step, with Raman gain if pumped, PMD), Raman ASE, amplifier gain
+and ASE. The metadata track the signal power and the accumulated ASE density,
+$S\leftarrow(SA_{\mathrm{pre}}A_FG_R+S_R)G+S_{\mathrm{EDFA}}$, so the OSNR metric is exact.
+\end{incode}
+\codeexcerpt{link_loop}{The multi-span loop of \blk{optical_link}.}
+\codeexcerpt{osnr_link}{OSNR after identical spans (\code{theory.osnr_link_db}).}
+
+% ==================================================================
+\section{Raman amplification}\label{sec:raman}
+Raman amplifiers, commercial since about 2010, use the transmission fiber itself as gain medium,
+through stimulated Raman scattering (SRS): a strong pump scatters on the vibrations of the silica
+molecules and transfers energy to photons at lower frequency. The gain peaks about 13\,THz below the
+pump, with a gain efficiency up to $C_R\approx0.4$\,W$^{-1}$km$^{-1}$ in standard fiber; a pump near 206\,THz
+(1455\,nm) amplifies the C band. Pumps of 0.5--1\,W are typical, and several pumps at different
+wavelengths add their gain profiles to cover the C and L bands. The pump is usually injected
+backwards from the span end (counter-propagating), which averages its power fluctuations and
+reduces the noise transferred to the signal.
+
+The gain is distributed: the signal does not fall as low as in a passive span. The difference
+between the output power with the pump on and off is the \emph{on/off gain}. The main benefit is on
+the noise: the signal reaches the following EDFA well above its noise floor, so the Raman + EDFA
+stage has a lower equivalent noise figure than the EDFA alone. Equivalent noise figures of 0\,dB and
+below are possible without violating any law: the amplification starts before the signal has
+fully attenuated, which shortens the effective loss of the span (distributed amplification has
+its own quantum limit).
+
+\paragraph{Model.} With a counter-propagating pump of input power $P_p$ and pump loss $\alpha_p$, the
+signal power gain coefficient along the span is
+\begin{gather}
+  g(z)=C_RP_p\,e^{-\alpha_p(L-z)},\qquad \frac{dP}{dz}=\big(g(z)-\alpha\big)P,\\
+  G_R=\exp\big(C_RP_pL_{\mathrm{eff},p}\big),\qquad L_{\mathrm{eff},p}=\frac{1-e^{-\alpha_pL}}{\alpha_p},
+\end{gather}
+where $G_R$ is the on/off gain. Spontaneous Raman scattering adds noise with density per polarization
+\begin{equation}
+  S_R=n_{sp}hf\int_0^Lg(z)\,G(z,L)\,dz,\qquad G(z,L)=\exp\int_z^L\big(g(z')-\alpha\big)dz',
+\end{equation}
+the ASE born at $z$ amplified to the span end, with $n_{sp}=1/(1-e^{-h\Delta\nu/kT})\approx1.14$ at the 13\,THz
+shift and room temperature. Without fiber and pump loss it reduces to the lumped
+$n_{sp}hf(G_R-1)$, which the test suite checks. In \blk{optical_link} the gain enters the linear
+half-steps of the split-step solver (so the higher power in the second half of the span also
+raises the Kerr nonlinearity), the Raman ASE is added at the span end, and the EDFA gain is reduced
+to keep the span transparent. The span's equivalent noise figure is reported as
+\begin{equation}
+  F_{\mathrm{eq}}=\frac{2(S_RG+S_{\mathrm{EDFA}})}{hf\,(G_{\mathrm{span}}-1)},
+\end{equation}
+the noise figure of a single lumped amplifier that would compensate the passive span loss
+$G_{\mathrm{span}}$ with the same total ASE.
+\codeexcerpt{raman}{Distributed Raman ASE.}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=2 by 1,horizontal sep=16mm},width=6.9cm,height=5.4cm]
+\nextgroupplot[xlabel={distance [km]},ylabel={signal power [dB]},xmin=0,xmax=100,ymin=-21,ymax=1,
+  legend pos=south west,legend style={font=\scriptsize}]
+  \addplot[th=black!60] table[x=z,y=passive]{\datafile{raman_profile}};
+  \addplot[th=accent3] table[x=z,y=p300]{\datafile{raman_profile}};
+  \addplot[th=accent] table[x=z,y=p600]{\datafile{raman_profile}};
+  \legend{no pump,300\,mW,600\,mW}
+\nextgroupplot[xlabel={pump power [mW]},ylabel={dB},xmin=0,xmax=800,legend pos=north west,
+  legend style={font=\scriptsize}]
+  \addplot[simline=accent] table[x=pump,y=osnr]{\datafile{raman_link}};
+  \addplot[simline={accent2,mark=square*}] table[x=pump,y=nf]{\datafile{raman_link}};
+  \legend{OSNR (0.1\,nm),$F_{\mathrm{eq}}$}
+\end{groupplot}
+\end{tikzpicture}
+\caption{Left: signal power along a 100\,km span with a counter-propagating pump ($C_R=0.4$\,W$^{-1}$km$^{-1}$,
+pump loss 0.25\,dB/km); the gap between each curve and the passive one at 100\,km is the on/off gain. Right: OSNR after
+$10\times100$\,km (0\,dBm, EDFA $F=5$\,dB) and equivalent span noise figure against the pump power, from
+\blk{optical_link}.}
+\label{fig:raman}
+\end{figure}
+
+\begin{pitfall}[Raman effects not modelled]
+Pump depletion, the Raman tilt between WDM channels (inter-channel SRS), double Rayleigh
+backscattering and the transfer of pump RIN to the signal are not included. The GN estimate of
+\cref{sec:gn} is not reported for Raman-pumped links, whose power profile breaks its assumptions.
+\end{pitfall}
+
+% ==================================================================
+\section{Coherent systems}\label{sec:coherent}
+\subsection{Throughput and spectral efficiency}
+Backbone links carry from a few to more than 100\,Tb/s per fiber over hundreds to more than
+10\,000\,km, with wavelength-division multiplexing (one laser per channel) and coherent
+transmission. Since traffic grows by 25--30\,\% per year, the goal is to maximize the throughput
+\begin{equation}
+  \text{Throughput}=\mathrm{SE}\cdot B,
+\end{equation}
+the product of the spectral efficiency and the optical bandwidth (5\,THz in the C band, 10\,THz in
+C+L, 12\,THz and more in extended bands). For a channel of bit rate $R_b^{\mathrm{ch}}$ occupying
+$B_{\mathrm{ch}}$, $\mathrm{SE}_{\mathrm{ch}}=R_b^{\mathrm{ch}}/B_{\mathrm{ch}}$; for $N_{\mathrm{ch}}$ identical channels spaced by guard bands $\delta_f$,
+\begin{equation}
+  \mathrm{SE}_{\mathrm{WDM}}=\frac{N_{\mathrm{ch}}R_b^{\mathrm{ch}}}{N_{\mathrm{ch}}B_{\mathrm{ch}}+(N_{\mathrm{ch}}-1)\delta_f}\approx\frac{R_b^{\mathrm{ch}}}{B_{\mathrm{ch}}+\delta_f}.
+\end{equation}
+With $B_{\mathrm{ch}}=(1+\rho)R_s$ (roll-off $\rho$, 0.1--0.2 today) and $R_b^{\mathrm{ch}}=R_s\cdot\mathrm{IR}$, where the information
+rate IR is the number of bits per symbol,
+\begin{equation}
+  \mathrm{SE}_{\mathrm{WDM}}\approx\frac{\mathrm{IR}}{(1+\rho)+\delta_f/R_s},
+\end{equation}
+so raising the symbol rate alone barely helps: the spectral efficiency grows with IR. IM/DD has
+IR\,=\,1 (OOK) and poor spectral control. Coherent systems modulate the four quadratures: PM-BPSK has
+IR\,=\,2, PM-QPSK 4, PM-8QAM 6, PM-16QAM 8, PM-64QAM 12. At 64\,GBd, PM-16QAM carries 512\,Gb/s gross; net
+rates subtract the FEC overhead (15--25\,\%) and framing (OTN, Ethernet). The throughput of a
+multi-fiber cable is $N_{\mathrm{fiber}}B\,\mathrm{SE}_{\mathrm{WDM}}$, with the bracketed factor $1/((1+\rho)+\delta_f/R_s)\approx0.8$--0.9.
+
+Three generations of commercial systems illustrate the trend: 10--32\,GBd PM-QPSK and PM-16QAM on a
+50\,GHz grid (100--200\,Gb/s, 10--20\,Tb/s per fiber, from 2010); up to 64\,GBd and multi-format
+transceivers adapting from PM-BPSK to PM-64QAM to the link GSNR (from 2017); about 140\,GBd with
+probabilistic constellation shaping and up to 1.2\,Tb/s per transceiver (from 2025), with fewer
+wavelengths for the same capacity. Pluggable coherent modules (CFP2-DCO, QSFP-DD, OSFP) serve
+data-center interconnect and metro.
+
+\subsection{The coherent receiver}
+A single photodiode detects $i\propto|\vect E|^2=|E_{Rx}|^2+|E_{Ix}|^2+|E_{Ry}|^2+|E_{Iy}|^2$: phase and polarization are
+lost. Coherent detection adds a strong local oscillator (LO) before the photodiode:
+\begin{equation}
+  i\propto|\vect E+\vect E_{LO}|^2=|\vect E|^2+|\vect E_{LO}|^2+2\Re\{\vect E\cdot\vect E_{LO}^*\}.
+\end{equation}
+With $\vect E_{LO}=E_{LOx}\hat x$ real and in phase with the carrier,
+$i\propto P_{ph}+P_{LO}+2E_{LOx}E_{Rx}(t)$: the beat term is proportional to one quadrature, boosted by the LO
+amplitude. \emph{Balanced detection} removes the common terms: an optical hybrid feeds two photodiodes
+with $\vect E+E_{LOx}\hat x$ and $\vect E-E_{LOx}\hat x$, and the difference current is
+\begin{equation}
+  i_{\mathrm{bal}}=i_1-i_2\propto4E_{LOx}E_{Rx}(t).
+\end{equation}
+An LO shifted by $90^\circ$ ($jE_{LOx}\hat x$) detects $E_{Ix}$, and the $y$ polarization is handled alike. The
+coherent front end (\cref{fig:coherent-fe}) splits signal and LO with polarization beam splitters,
+mixes each polarization with the LO in a $90^\circ$ hybrid (outputs $E_x\pm E_{LOx}$, $E_x\pm jE_{LOx}$) and
+detects the four outputs with balanced photodetectors; integrated coherent receivers contain all of
+it. The LO is a free-running laser: with an arbitrary phase $\alpha$ the "I" output is
+$E_{LO}[E_{Rx}\cos\alpha+E_{Ix}\sin\alpha]$, a rotation of the quadratures. The fiber also rotates the
+polarization, so the received quadratures are
+\begin{equation}
+  \begin{pmatrix}E'_{Rx}\\E'_{Ix}\\E'_{Ry}\\E'_{Iy}\end{pmatrix}=\mat M(t)\begin{pmatrix}E_{Rx}\\E_{Ix}\\E_{Ry}\\E_{Iy}\end{pmatrix},
+\end{equation}
+with $\mat M(t)$ a time-varying $4\times4$ orthogonal matrix (a $2\times2$ unitary Jones matrix) for a lossless
+fiber without polarization-dependent loss. Estimating and inverting it, together with the LO
+phase, is the job of the receiver DSP (\cref{sec:coherent-dsp}).
+
+\blk{coherent_receiver} outputs the complex photocurrent per polarization,
+\begin{equation}
+  i_I+j\,i_Q=\mathcal R\sqrt{P_{LO}}\;E(t)\,e^{-j(2\pi\Delta f\,t+\phi_{LO}(t))}+n(t),
+\end{equation}
+with LO frequency offset $\Delta f$ and phase noise $\phi_{LO}$, LO shot noise and TIA noise. With dual
+polarization a splitter feeds each hybrid with half of the LO. With a strong LO the LO shot noise
+$2q\mathcal RP_{LO}B$ dominates the TIA noise; signal and shot noise then scale together, so the split does
+not change the shot-noise-limited SNR, only the margin over TIA noise. \prm{hybrid_phase_error_deg}
+models a hybrid that is not exactly $90^\circ$ (I/Q skew).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=5mm and 8mm]
+  \node[blockbox] (pbs) {PBS};
+  \node[blockbox,right=of pbs,yshift=10mm,minimum height=11mm] (hx) {$90^\circ$\\hybrid X};
+  \node[blockbox,right=of pbs,yshift=-10mm,minimum height=11mm] (hy) {$90^\circ$\\hybrid Y};
+  \node[warmbox,above=4mm of hx] (lox) {LO ($\Delta f$, $\Delta\nu$)};
+  \node[warmbox,below=4mm of hy] (loy) {LO ($\Delta f$, $\Delta\nu$)};
+  \node[greenbox,right=of hx,minimum width=13mm] (bx) {2 balanced\\PDs};
+  \node[greenbox,right=of hy,minimum width=13mm] (by) {2 balanced\\PDs};
+  \node[blockbox,right=of bx] (ax) {ADC};
+  \node[blockbox,right=of by] (ay) {ADC};
+  \node[left=6mm of pbs,lbl] (in) {$E_x,E_y$};
+  \draw[sig] (in)--(pbs); \draw[sig] (pbs.east)--(hx.west); \draw[sig] (pbs.east)--(hy.west);
+  \draw[sig] (lox)--(hx); \draw[sig] (loy)--(hy);
+  \draw[sig] (hx)--(bx); \draw[sig] (hy)--(by); \draw[sig] (bx)--node[above,lbl]{$I_x,Q_x$}(ax); \draw[sig] (by)--node[above,lbl]{$I_y,Q_y$}(ay);
+\end{tikzpicture}
+\caption{Polarization-diverse coherent front end, modelled by \blk{coherent_receiver}. One LO laser is
+split between the two hybrids.}
+\label{fig:coherent-fe}
+\end{figure}
+
+\begin{incode}
+The simulator processes each frame with circular FFTs (fiber, dispersion compensation). An LO
+phase that does not return to its initial value at the end of the frame would create a
+discontinuity, spread over the frame by the dispersion compensator. The block therefore rounds the
+frequency offset to the frame's grid $f_s/n$ and turns the Wiener phase into a Brownian bridge,
+$\phi_k-\frac kn\phi_n$, which has the same local increments but returns to zero.
+\end{incode}
+\codeexcerpt{coherent_rx}{Coherent detection with a periodic LO phase (\blk{coherent_receiver}).}
+
+\subsection{Noise, matched filtering and decision variables}
+At the receiver input the field is signal plus ASE,
+\begin{equation}
+  \vect E_{ph}(t)=\sqrt{\frac{P_s}{R_s}}\sum_n\vect a_ng(t-nT)+\vect n(t),
+\end{equation}
+with the four ASE components white with density $N_0/2$. An optical band-pass filter (a WDM
+demultiplexer, much wider than the channel) shapes them as $\frac{N_0}2|H(f)|^2$, essentially flat over the
+channel. The front end delivers the four noisy quadratures, and the optimum detector for AWGN is a
+matched filter $h(t)=g^*(-t)$ (made causal with a delay $t_d$), implemented in the DSP. For a
+root-raised-cosine $g(t)$ the overall pulse $p=g*g^*(-t)$ is raised cosine, $P(f)=|G(f)|^2$, which
+satisfies the Nyquist criterion: no ISI at $t=kT$. Sampling gives the decision variables
+\begin{equation}
+  d_{k,x}=\sqrt{E_{s,x}}\,a_{k,x}+n_{F,x},\qquad d_{k,y}=\sqrt{E_{s,y}}\,a_{k,y}+n_{F,y},
+\end{equation}
+with $E_{s,x}=E_{s,y}=E_s/2$ for equal power, and four independent Gaussian noise components of variance
+$\sigma^2=\frac{N_0}2\int|g|^2=\frac{N_0}2$.
+
+\subsection{BER of PM-QPSK and the constellation SNR}\label{sec:coherent-snr}
+For PM-QPSK each quadrature is an independent binary signal of amplitude $\pm\sqrt{E_s/2}\cdot\frac1{\sqrt2}=\pm\frac{\sqrt{E_s}}2$
+in Gaussian noise of variance $N_0/2$, so
+\begin{equation}
+  P_e=\int_{-\infty}^{-\sqrt{E_s}/2}\frac{e^{-x^2/N_0}}{\sqrt{\pi N_0}}dx=\frac12\erfc\Big(\sqrt{\frac{E_s}{4N_0}}\Big),
+\end{equation}
+the BER of each of the four Gray-coded bits. The SNR is the same whether measured on one real
+component ($\frac{E_s/4}{N_0/2}$), on one polarization ($\frac{E_s/2}{N_0}$) or on the four-dimensional symbol
+($\frac{E_s}{2N_0}$):
+\begin{equation}
+  \mathrm{SNR}=\frac{E_s}{2N_0},\qquad \mathrm{BER}_{\mathrm{PM\text-QPSK}}=\frac12\erfc\Big(\sqrt{\frac{\mathrm{SNR}}2}\Big).
+\end{equation}
+This "constellation SNR" is measurable optically. The ASE power in $B$ over both polarizations is
+$4\frac{N_0}2B=2N_0B$, so the GSNR in the reference bandwidth $B=R_s$ is
+\begin{equation}
+  \mathrm{GSNR}_{B=R_s}=\frac{P_{\mathrm{sig}}}{2N_0R_s}=\frac{E_sR_s}{2N_0R_s}=\frac{E_s}{2N_0}=\mathrm{SNR}_{\mathrm{constellation}},
+\end{equation}
+in the absence of transceiver noise. The apparent factor of 2 with the wireless formula
+$\frac12\erfc\sqrt{E_s/(2N_0)}$ for QPSK disappears with consistent definitions: there $E_s$ is the
+energy per polarization and $N_0$ the density of the complex noise. In LinkStudio the link metric
+\code{osnr_rs_db} is this constellation SNR, equal to $E_s/N_0$ per polarization in the convention of
+the baseband chapters.
+
+\subsection{BER of PM-QAM}
+For AWGN with Gray labels the course gives, in terms of the constellation SNR per polarization:
+\begin{gather}
+  \mathrm{BER}_{\mathrm{PM\text-BPSK}}=\frac12\erfc\sqrt{\mathrm{SNR}},\qquad
+  \mathrm{BER}_{\mathrm{PM\text-QPSK}}=\frac12\erfc\sqrt{\frac{\mathrm{SNR}}2},\\
+  \mathrm{BER}_{M\text-\mathrm{QAM}}\approx\frac{L-1}{L\log_2L}\erfc\sqrt{\frac{3\,\mathrm{SNR}}{2(L^2-1)}}\quad(M=L^2),\\
+  \mathrm{BER}_{8\mathrm{QAM}}\approx\frac23\erfc\sqrt{\frac{3}{14}\mathrm{SNR}},\qquad
+  \mathrm{BER}_{16\mathrm{QAM}}\approx\frac38\erfc\sqrt{\frac{\mathrm{SNR}}{10}},\\
+  \mathrm{BER}_{32\mathrm{QAM}}\approx\frac{13}{40}\erfc\sqrt{\frac{\mathrm{SNR}}{20}},\quad
+  \mathrm{BER}_{64\mathrm{QAM}}\approx\frac{7}{24}\erfc\sqrt{\frac{\mathrm{SNR}}{42}},
+\end{gather}
+accurate between $3\times10^{-2}$ and $10^{-3}$ and below. The general square-QAM expression, written here
+with the prefactor and argument that reproduce the specific cases ($L=2,4,8$), is the
+nearest-neighbour approximation of the exact result of \cref{ch:modulation}. They are available as
+\code{theory.ber_pm_qam}. \Cref{fig:coherent-ber} compares them with back-to-back simulations in which
+an attenuator and an amplifier load the signal with ASE and the SNR is the amplifier's
+\code{osnr_rs_db} metric.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{semilogyaxis}[width=11cm,height=6.2cm,xlabel={constellation SNR $=E_s/(2N_0)=\mathrm{OSNR}_{B=R_s}$ [dB]},
+  ylabel={BER},xmin=4,xmax=22,ymin=1e-6,ymax=0.2,legend pos=south west,legend style={font=\scriptsize}]
+  \addplot[th=black!50] table[x=snr,y=bpsk]{\datafile{coherent_ber_theory}};
+  \addplot[th=accent] table[x=snr,y=qpsk]{\datafile{coherent_ber_theory}};
+  \addplot[th=accent4] table[x=snr,y=qam8]{\datafile{coherent_ber_theory}};
+  \addplot[th=accent2] table[x=snr,y=qam16]{\datafile{coherent_ber_theory}};
+  \addplot[th=accent3] table[x=snr,y=qam64]{\datafile{coherent_ber_theory}};
+  \addplot[sim=accent] table[x=snr4,y=ber4]{\datafile{coherent_ber_sim}};
+  \addplot[sim={accent2,mark=square*}] table[x=snr16,y=ber16]{\datafile{coherent_ber_sim}};
+  \legend{PM-BPSK,PM-QPSK,PM-8QAM,PM-16QAM,PM-64QAM,simulated PM-QPSK,simulated PM-16QAM}
+\end{semilogyaxis}
+\end{tikzpicture}
+\caption{BER of PM-QAM formats against the constellation SNR: course formulas (lines) and back-to-back
+32\,GBd simulations with ASE noise loading (markers).}
+\label{fig:coherent-ber}
+\end{figure}
+
+The information rate actually achieved is below the nominal IR and depends on the SNR: 16-QAM
+approaches 4\,bit/symbol per polarization only above about 15\,dB, and at 10\,dB carries about 3.2. A
+constellation is used near its maximum IR, where a FEC with 15--27\,\% overhead can correct the
+pre-FEC BER (up to a few $10^{-2}$ for soft decision). Typical operating SNRs are 5--8\,dB for QPSK,
+8--11\,dB for 8-QAM, 11--14\,dB for 16-QAM, 14--17\,dB for 32-QAM and 17--20\,dB for 64-QAM, so higher IR
+requires higher SNR. Soft-decision FEC and probabilistic shaping let the IR follow the channel
+capacity more finely.
+
+\subsection{Transceiver noise: ISNR and GSNR}
+The SNR on the recovered constellation contains link noise and noise generated inside the
+transceiver,
+\begin{equation}
+  \mathrm{SNR}=\frac{P_{\mathrm{sig}}}{P_{N,\mathrm{link}}+P_{N,\mathrm{int}}},\qquad
+  P_{N,\mathrm{link}}=P_{\mathrm{ASE}}+\eta_{\mathrm{NLI}}P_{\mathrm{sig}}^3,\qquad P_{N,\mathrm{int}}=\chi_{N,\mathrm{int}}P_{\mathrm{sig}}.
+\end{equation}
+The link noise is ASE plus nonlinear interference (\cref{sec:gn}); the internal noise (electrical
+amplifiers, DAC and ADC quantization, modulator and other imperfections) scales with the signal.
+Back to back the receiver measures the internal SNR, $\mathrm{ISNR}=1/\chi_{N,\mathrm{int}}$, a property of the
+transceiver pair (20--21\,dB for state-of-the-art equipment); the link alone is characterized by
+$\mathrm{GSNR}=P_{\mathrm{sig}}/P_{N,\mathrm{link}}$, which reduces to the OSNR when only ASE counts. Then
+\begin{equation}
+  \frac1{\mathrm{SNR}}=\frac1{\mathrm{GSNR}}+\frac1{\mathrm{ISNR}},\qquad \mathrm{SNR}=\frac{\mathrm{GSNR}\cdot\mathrm{ISNR}}{\mathrm{GSNR}+\mathrm{ISNR}} :
+\end{equation}
+the link dominates when $\mathrm{ISNR}\gg\mathrm{GSNR}$, the transceiver when $\mathrm{GSNR}\gg\mathrm{ISNR}$. The ISNR caps the usable
+constellation (around PM-64QAM for long haul today). \prm{internal_snr_db} of \blk{coherent_receiver}
+adds Gaussian noise of variance $P_{\mathrm{sig}}/\mathrm{ISNR}$ to the photocurrents; the test suite checks that a
+noiseless input then shows exactly that SNR.
+\codeexcerpt{coh_isnr}{Hybrid phase error and transceiver noise.}
+
+\subsection{Coherent digital signal processing}\label{sec:coherent-dsp}
+The chain follows the architecture described by Savory~\cite{savory2010}. \Cref{fig:coherent-const}
+follows a 128\,Gb/s DP-QPSK signal through it after $20\times80$\,km, with random polarization, a 1\,GHz LO
+offset and 100\,kHz lasers.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[group style={group size=4 by 1,horizontal sep=4mm,y descriptions at=edge left},
+  constaxis,width=4.1cm,height=4.1cm,xmin=-2.2,xmax=2.2,ymin=-2.2,ymax=2.2,xtick={-2,0,2},ytick={-2,0,2}]
+\nextgroupplot[title={front-end output}]
+  \addplot[scatterpts=black!50] table[x=i,y=q]{\datafile{coh_rx}};
+\nextgroupplot[title={after CD + FO comp.}]
+  \addplot[scatterpts=accent4] table[x=i,y=q]{\datafile{coh_fo}};
+\nextgroupplot[title={after $2{\times}2$ equalizer}]
+  \addplot[scatterpts=accent] table[x=i,y=q]{\datafile{coh_eq}};
+\nextgroupplot[title={after phase recovery}]
+  \addplot[scatterpts=accent3] table[x=i,y=q]{\datafile{coh_cpr}};
+\end{groupplot}
+\end{tikzpicture}
+\caption{Polarization X of the \emph{Coherent DP-QPSK long haul} scenario at four points of the DSP
+chain (normalized to unit power). After 1600\,km of uncompensated dispersion the front-end output is
+noise-like (\cref{sec:gn}).}
+\label{fig:coherent-const}
+\end{figure}
+
+\paragraph{Chromatic dispersion compensation.} The accumulated dispersion is known from the
+metadata (or given), and its all-pass response \cref{eq:dispersion-operator} is inverted exactly by
+multiplying with its conjugate in the frequency domain (\cref{lst:cd_comp}). In modern systems
+there is no optical dispersion compensation: uncompensated transmission (UT).
+
+\paragraph{Frequency-offset estimation.} Raising QPSK to the fourth power removes the modulation:
+$(s\,e^{j2\pi\Delta ft})^4=s^4e^{j2\pi4\Delta ft}$ with $s^4=-1$ for every QPSK symbol, and roughly constant on
+average for square QAM. The spectrum of $r^4$ has a line at $4\Delta f$; the estimate is its peak divided
+by 4, refined by zero-padding and computed on a low-pass copy. In dual polarization a rotated
+mixture $as_1+bs_2$ has a fourth-power line proportional to $a^4+b^4$, which can vanish, so the
+estimator also uses $(x_0+x_1)/\sqrt2$ and $(x_0+jx_1)/\sqrt2$. Compensating the offset \emph{after} the
+dispersion compensator leaves the residual $\exp\big(j\frac{\beta_2L}{2}(2\omega\Delta\omega+\Delta\omega^2)\big)$, a bulk delay
+$\beta_2L\Delta\omega$ plus a constant phase, which the block removes.
+\codeexcerpt{fo_est}{Fourth-power FO estimation over several polarization combinations.}
+
+\paragraph{Adaptive $2\times2$ equalization.} Polarization rotation, PMD and residual dispersion form
+a $2\times2$ MIMO channel, inverted by a fractionally spaced butterfly of four FIR filters
+(\cref{fig:butterfly}):
+\begin{equation}
+  y_p[k]=\sum_{q\in\{x,y\}}\vect w_{pq}\T\,\vect u_q[k],\qquad
+  \vect w_{pq}\leftarrow\vect w_{pq}+\mu\,e_p[k]\,\vect u_q\conj[k] .
+\end{equation}
+The error $e_p$ is either the constant-modulus error $y_p(R-|y_p|^2)$ with $R=\E|s|^4/\E|s|^2$ (Godard's
+CMA~\cite{godard1980}), blind and insensitive to the carrier phase, or the LMS error $d_p-y_p$, trained
+on known symbols and then decision directed, with a larger step during training.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \node[lbl,anchor=east] (xi) at (0,0) {$x$ in};
+  \node[lbl,anchor=east] (yi) at (0,-3.3) {$y$ in};
+  \node[blockbox,minimum width=11mm] (wxx) at (2.2,0.2) {$\vect w_{xx}$};
+  \node[blockbox,minimum width=11mm] (wyx) at (2.2,-1.0) {$\vect w_{yx}$};
+  \node[blockbox,minimum width=11mm] (wxy) at (2.2,-2.3) {$\vect w_{xy}$};
+  \node[blockbox,minimum width=11mm] (wyy) at (2.2,-3.5) {$\vect w_{yy}$};
+  \node[sumnode] (sx) at (4.4,0) {$+$};
+  \node[sumnode] (sy) at (4.4,-3.3) {$+$};
+  \node[lbl,anchor=west] (xo) at (5.2,0) {$x$ out};
+  \node[lbl,anchor=west] (yo) at (5.2,-3.3) {$y$ out};
+  \coordinate (bx) at (0.7,0); \coordinate (by) at (0.7,-3.3);
+  \draw[thick] (xi.east) -- (bx); \draw[thick] (yi.east) -- (by);
+  \draw[sig] (bx) |- (wxx.west); \draw[sig] (bx) |- (wyx.west);
+  \draw[sig] (by) |- (wxy.west); \draw[sig] (by) |- (wyy.west);
+  \fill (bx) circle (1.2pt); \fill (by) circle (1.2pt);
+  \draw[sig] (wxx.east) -- (sx); \draw[sig] (wxy.east) -- (sx.south west);
+  \draw[sig] (wyy.east) -- (sy); \draw[sig] (wyx.east) -- (sy.north west);
+  \draw[sig] (sx) -- (xo); \draw[sig] (sy) -- (yo);
+\end{tikzpicture}
+\caption{The butterfly equalizer (2 samples per symbol, \prm{n_taps} taps per filter).}
+\label{fig:butterfly}
+\end{figure}
+\codeexcerpt{butterfly}{Butterfly update with CMA or trained/decision-directed LMS.}
+
+\paragraph{Carrier phase recovery.} Laser phase noise of $2\times100$\,kHz at 32\,GBd is slow but needs
+feed-forward tracking. The Viterbi--Viterbi estimator removes the QPSK modulation with the fourth
+power, $\hat\phi=\frac14\big(\arg\sum_{|i|\le W}y_{k+i}^4-\pi\big)$; blind phase search (BPS)~\cite{pfau2009} works for any square
+QAM: it rotates the symbols by $B$ test phases in $[-\pi/4,\pi/4)$, sums over a window the squared
+distances to the nearest points and keeps the best phase. Both are defined modulo $\pi/2$ and are
+unwrapped on $4\hat\phi$; the quadrant ambiguity is resolved once per frame with a short block of known
+symbols after the equalizer has converged.
+\codeexcerpt{bps}{Viterbi--Viterbi and blind phase search.}
+
+% ==================================================================
+\section{Nonlinear interference and the GN model}\label{sec:gn}
+\subsection{Gaussianity of dispersed signals}
+In uncompensated transmission the accumulated dispersion is enormous: a 100\,GBd signal spreads over
+17 symbols after 10\,km and over 1700 after 1000\,km. The four quadratures of the received field are
+then sums of many independent symbols and take an approximately zero-mean, uncorrelated Gaussian
+distribution, with the power spectral density of the transmitted signal ($|H_F|=1$): the constellation
+before DSP looks like a Gaussian cloud (\cref{fig:coherent-const}, left). The Kerr nonlinearity acts on
+this noise-like signal. The nonlinear disturbance that the WDM channels generate on each other and on
+themselves, the \emph{nonlinear interference} (NLI), is therefore itself approximately additive
+Gaussian noise, like ASE, and adds to it:
+\begin{equation}
+  \mathrm{GSNR}=\frac{P_{\mathrm{ch}}}{P_{\mathrm{ASE}}+P_{\mathrm{NLI}}} .
+\end{equation}
+After CD compensation the NLI appears as a cloud around the constellation points, and the BER follows
+from the GSNR with the AWGN formulas.
+
+\subsection{The Gaussian-noise model}
+The GN model~\cite{poggiolini2012} gives the NLI power in closed form under these assumptions:
+identical channels (symbol rate $R_s$, power $P_{\mathrm{ch}}$, compact spectra), equal spacing $\Delta f$, identical
+transparent spans of length $L_s$ with loss coefficient $\alpha$, dispersion $\beta_2$ and nonlinearity $\gamma$. For
+one span, with $\alpha$ the \emph{field} loss coefficient ($\alpha_{\mathrm{dB}}=8.686\,\alpha$),
+\begin{equation}
+  P^{(1)}_{\mathrm{NLI}}=\eta^{(1)}P_{\mathrm{ch}}^3,\qquad
+  \eta^{(1)}=\frac{8}{27}\,\frac{\gamma^2L_{\mathrm{eff}}^2}{\pi|\beta_2|L_{\mathrm{eff},a}R_s^2}\,
+  \operatorname{asinh}\Big(\frac{\pi^2}{2}|\beta_2|L_{\mathrm{eff},a}R_s^2N_{\mathrm{ch}}^{2R_s/\Delta f}\Big),
+  \label{eq:gn}
+\end{equation}
+with $L_{\mathrm{eff}}=(1-e^{-2\alpha L_s})/(2\alpha)$ and $L_{\mathrm{eff},a}=1/(2\alpha)$. For long spans $L_{\mathrm{eff}}\to1/(2\alpha)$ and it reduces to the
+form of the course,
+\begin{equation}
+  \eta^{(1)}\approx\frac{4}{27\pi}\,\frac{\gamma^2}{|\beta_2|\alpha R_s^2}\operatorname{asinh}\Big(\frac{\pi^2}{4\alpha}|\beta_2|R_s^2N_{\mathrm{ch}}^{2R_s/\Delta f}\Big)
+  \approx\frac{4}{27\pi}\,\frac{\gamma^2}{|\beta_2|\alpha R_s^2}\ln\Big(\frac{\pi^2}{2\alpha}|\beta_2|R_s^2N_{\mathrm{ch}}^{2R_s/\Delta f}\Big),
+\end{equation}
+where $\operatorname{asinh}x\approx\ln2x$ for $x>3$, always the case in practice. The exact effective length of
+\cref{eq:gn} also makes the NLI vanish correctly for short spans (the course uses the factor
+$1-e^{-4\alpha L_s}$ for the same purpose). The formula holds for $R_s\ge25$\,GBd, span loss $\ge7$\,dB,
+$|\beta_2|>4$\,ps$^2$/km and roll-off below 0.5. Its main features: the NLI grows as $P_{\mathrm{ch}}^3$ and as $\gamma^2$, and
+decreases with $|\beta_2|$, because higher dispersion decorrelates the interacting signals faster.
+Assuming incoherent accumulation, $M$ identical spans give $P_{\mathrm{NLI,tot}}=M\eta^{(1)}P_{\mathrm{ch}}^3$.
+\codeexcerpt{gn_eta}{The GN-model coefficient $\eta$ of one span (\code{theory.gn_eta}).}
+
+\subsection{Optimum launch power and the 3\,dB rule}
+For $M$ identical spans with ASE $P^{(1)}_{\mathrm{ASE}}=hfR_sF(G-1)$ per span,
+\begin{equation}
+  \mathrm{GSNR}=\frac{P_{\mathrm{ch}}}{M\big(P^{(1)}_{\mathrm{ASE}}+\eta^{(1)}P_{\mathrm{ch}}^3\big)} .
+\end{equation}
+At low power the ASE dominates and the GSNR grows with $P_{\mathrm{ch}}$; at high power the NLI dominates and it
+falls as $1/P_{\mathrm{ch}}^2$. Setting $d\,\mathrm{GSNR}/dP_{\mathrm{ch}}=0$ gives $P^{(1)}_{\mathrm{ASE}}-2\eta^{(1)}P^3_{\mathrm{ch}}=0$:
+\begin{equation}
+  P_{\mathrm{ch,opt}}=\sqrt[3]{\frac{P^{(1)}_{\mathrm{ASE}}}{2\eta^{(1)}}},\qquad
+  \mathrm{GSNR}_{\max}\cdot M=\frac{2}{3\sqrt[3]{2\eta^{(1)}\big[P^{(1)}_{\mathrm{ASE}}\big]^2}} ,
+\end{equation}
+independent of the number of spans; the same power maximizes the reach for a target GSNR. At the
+optimum $P_{\mathrm{NLI}}=\frac12P_{\mathrm{ASE}}$ (span by span and in total): the ASE is 3\,dB above the NLI, and the GSNR
+counting only NLI is twice the OSNR. Lumped losses before the fiber $A_{\mathrm{pre}}$ reduce the power
+entering the fiber and give $\tilde\eta^{(1)}=\eta^{(1)}A_{\mathrm{pre}}^2$ referred to the span input.
+
+\Cref{fig:gn-launch} checks the model against the split-step solver on the \emph{WDM with fiber
+nonlinearity} scenario: five 32\,GBd DP-QPSK channels at 50\,GHz over $10\times80$\,km of standard fiber. The
+markers are the MER of the centre channel after the full DSP chain; the line is the GSNR of
+\cref{eq:gn} plus ASE ($\eta=\gneta$\,W$^{-2}$ per span, $P_{\mathrm{opt}}=\gnpopt$\,dBm). Both show the optimum launch
+power and the $-2$\,dB/dB slope above it; the simulated optimum is within 1\,dB of the predicted one. Near
+the optimum the simulation is about 1\,dB below the model because the MER includes the adaptive
+equalizer and phase recovery penalties; at high power it is about 1\,dB above, because the GN model
+overestimates the NLI of non-Gaussian formats such as QPSK (the correction of the enhanced GN
+model~\cite{carena2014}).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=11cm,height=6cm,xlabel={launch power per channel [dBm]},ylabel={SNR [dB]},xmin=-6,xmax=8,
+  ymin=8,ymax=26,legend pos=south west,legend style={font=\scriptsize}]
+  \addplot[th=accent] table[x=p,y=gsnr]{\datafile{gn_launch_theory}};
+  \addplot[th=black!40,dashed] table[x=p,y=osnr]{\datafile{gn_launch_theory}};
+  \addplot[th=black!40,dotted] table[x=p,y=nli]{\datafile{gn_launch_theory}};
+  \addplot[sim=accent2] table[x=p,y=mer]{\datafile{gn_launch_sim}};
+  \legend{GN model GSNR,ASE only (OSNR),NLI only,{split-step, MER after DSP}}
+\end{axis}
+\end{tikzpicture}
+\caption{Received SNR of the centre channel of a 5-channel WDM comb against the launch power:
+split-step simulation and GN model.}
+\label{fig:gn-launch}
+\end{figure}
+
+\subsection{Non-identical spans and the LOGO principle}
+Terrestrial links have spans of different lengths and fibers, and the WDM comb can change along the
+route. With span $i$ described by its input power $P^{\mathrm{in}}_{\mathrm{ch},i}$, lumped losses $A_{\mathrm{pre},i}$, $A_{\mathrm{post},i}$,
+fiber loss $A_{F,i}=e^{-2\alpha_iL_i}$ and amplifier $G_i$, $F_i$, the noise at the receiver is
+\begin{equation}
+  P_{\mathrm{ASE,tot}}=\sum_{i=1}^MP^{(1)}_{\mathrm{ASE},i}\prod_{j=i+1}^MA_{\mathrm{span},j}G_j,\qquad
+  P_{\mathrm{NLI,tot}}=\sum_{i=1}^MP^{(1)}_{\mathrm{NLI},i}\prod_{j=i+1}^MA_{\mathrm{span},j}G_j,
+\end{equation}
+with $P^{(1)}_{\mathrm{ASE},i}=hfBF_i(G_i-1)$ and $P^{(1)}_{\mathrm{NLI},i}=\tilde\eta_i(P^{\mathrm{in}}_{\mathrm{ch},i})^3A_{F,i}A_{\mathrm{post},i}G_i$. With transparency the
+products are 1 and $\mathrm{GSNR}=P_{\mathrm{ch}}/\big(\sum_ihfBF_i(G_i-1)+P_{\mathrm{ch}}^3\sum_i\tilde\eta_i\big)$, but transparency is not
+optimal for different spans. The total GSNR is the "parallel" combination of span-local GSNRs, each the
+signal at the span output over the noise the span adds:
+\begin{equation}
+  \frac1{\mathrm{GSNR}_{\mathrm{tot}}}=\sum_{i=1}^M\frac1{\mathrm{GSNR}_i},\qquad
+  \mathrm{GSNR}_i=\frac{P^{\mathrm{in}}_{\mathrm{ch},i}A_{\mathrm{span},i}G_i}{P^{(1)}_{\mathrm{ASE},i}+\tilde\eta_i(P^{\mathrm{in}}_{\mathrm{ch},i})^3} .
+\end{equation}
+The \emph{LOGO} principle (local optimization, global optimization) follows: maximizing each $\mathrm{GSNR}_i$
+maximizes the total, with
+\begin{equation}
+  P^{\mathrm{in}}_{\mathrm{ch},i,\mathrm{opt}}=\sqrt[3]{\frac{P^{(1)}_{\mathrm{ASE},i}}{2\tilde\eta_i}},\qquad
+  \mathrm{GSNR}_{i,\max}=\frac{2A_{\mathrm{span},i}G_i}{3\sqrt[3]{2\tilde\eta_i\big[P^{(1)}_{\mathrm{ASE},i}\big]^2}} .
+\end{equation}
+The apparent circularity (the optimum
+input power depends on the gain, which sets the next input power) disappears for $G_i\gg1$: the
+optimum powers follow from the span properties, and the gains are then set to deliver them. The
+3\,dB rule holds span by span. LOGO makes the management of large heterogeneous networks tractable.
+For arbitrary combs the NLI on a channel splits into self-channel interference (SCI, related to SPM)
+and cross-channel interference (XCI, XPM and FWM), given by the EGN model.
+
+\begin{incode}
+The split-step solver computes the NLI directly. For EDFA-only transparent links,
+\blk{optical_link} also reports the GN estimate for the WDM comb in the \meta{wdm} metadata
+(\code{gn_nli_dbm}, \code{gsnr_gn_db}, \code{gn_optimum_launch_dbm}), useful to choose the launch power
+before running the heavy nonlinear simulation.
+\end{incode}
+\codeexcerpt{link_gn}{GN-model metrics of \blk{optical_link}.}
+
+% ==================================================================
+\section{Wavelength-division multiplexing}
+WDM is frequency-division multiplexing of optical carriers: each channel has its own laser and the
+channels share the fiber and the amplifiers. In the C band (about 191.7--196.1\,THz) a 50\,GHz grid holds
+about 100 channels, an 87.5\,GHz grid about 60. Optical filters select channels with a transfer function
+on the field, $E_{\mathrm{out}}(f)=H_{\mathrm{opt}}(f)E_{\mathrm{in}}(f)$, as rectangular as possible: low loss in band, strong
+rejection outside. A guard band is needed for the filters (wavelength-selective switches in
+reconfigurable networks), which is why Nyquist WDM ($\delta_f\to0$) is hard to reach.
+
+\blk{wdm_multiplexer} surrounds the channel under test with $N_{\mathrm{ch}}-1$ neighbours at multiples of the
+spacing, carrying independent symbols with the same constellation, pulse shape and power.
+Propagating the composite field through a nonlinear fiber produces cross-phase modulation and
+four-wave mixing. \blk{wdm_demultiplexer} selects a channel with a second-order super-Gaussian filter,
+$|H(f)|=\exp\!\big(-\tfrac{\ln2}{2}(2f/B)^4\big)$, 3\,dB down at $\pm B/2$. The sample rate must cover all channels.
+\codeexcerpt{wdm_demux}{Channel selection by frequency shift and optical filtering.}
 
 % ==================================================================
 \section{Free-space optics}
@@ -754,208 +2240,32 @@ modelled. The \emph{Free-space optical link budget} scenario runs a 1\,Gb/s OOK 
 with all four effects.
 \codeexcerpt{fso_channel}{Losses and fading of \blk{fso_channel}.}
 
-% ==================================================================
-\section{Direct detection}
-\subsection{PIN and APD receivers}
-A photodiode converts power into current, $I=\mathcal RP$, with responsivity $\mathcal R$
-(A/W). Over the noise bandwidth $B=f_s/2$ (or through the reference receiver filter of
-\cref{sec:mmf} when \prm{bandwidth_ghz} is set) the current carries three contributions:
-\begin{itemize}
-  \item \textbf{shot noise}, $\sigma_{\mathrm{sh}}^2=2qM^2F\,(\mathcal RP+I_d)B$;
-  \item \textbf{thermal noise}, $\sigma_{\mathrm{th}}^2=i_n^2B$, with $i_n$ the input-referred
-  current density (\prm{thermal_noise_pa_rthz});
-  \item \textbf{avalanche gain} (APD): the multiplication $M$ comes with McIntyre's excess noise
-  factor $F=kM+(1-k)(2-1/M)$, with $k$ the ionization ratio.
-\end{itemize}
-The APD gain raises the signal above thermal noise but amplifies shot noise by $M^2F$, so there
-is an optimum $M$.
-\codeexcerpt{photodiode}{Square-law detection with shot, thermal and APD excess noise.}
-
-\subsection{OOK sensitivity and the Q factor}
-For on--off keying with levels $I_{1,0}=\mathcal RP_{1,0}$ and Gaussian noise of standard
-deviations $\sigma_{1,0}$, the optimum threshold gives
-\begin{equation}
-  \mathrm{BER}=\frac12\erfc\Big(\frac{Q}{\sqrt2}\Big),\qquad Q=\frac{I_1-I_0}{\sigma_1+\sigma_0},
-  \qquad P_{1,0}=\frac{2P_{\mathrm{avg}}}{1+\mathrm{ER}^{\mp1}} .
-\end{equation}
-Thermal noise is signal independent, so $\sigma_1=\sigma_0$ and $Q\propto P_{\mathrm{avg}}$: the BER
-falls by many decades within a few dB (\cref{fig:ook}). The receiver sensitivity is
-conventionally quoted at $10^{-9}$ ($Q=6$) or at a FEC threshold.
-
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}
-\begin{semilogyaxis}[width=10cm,height=6cm,xlabel={average received power [dBm]},ylabel={BER},
-  xmin=-28,xmax=-18,ymin=1e-7,ymax=0.5,legend pos=south west]
-  \addplot[th=accent] table[x=p,y=ber]{\datafile{ook_theory}};
-  \addplot[sim=accent2] table[x=p,y=ber]{\datafile{ook_sim}};
-  \legend{Q-factor theory,simulated}
-\end{semilogyaxis}
-\end{tikzpicture}
-\caption{10\,Gb/s NRZ-OOK into a thermal-noise-limited PIN receiver ($\mathcal R=0.8$\,A/W,
-20\,pA/$\sqrt{\mathrm{Hz}}$, ER\,=\,10\,dB): chain \blk{intensity_modulator}$\to$\blk{photodiode}$\to$\blk{agc}$\to$\blk{line_decoder}
-against the Q-factor formula.}
-\label{fig:ook}
-\end{figure}
-
-\begin{incode}
-\blk{agc} removes the mean (the DC photocurrent) and scales each frame to the nominal symbol
-power of the upstream line code or constellation. It subtracts the known noise variance when
-estimating the signal power, so the decision thresholds stay correct at low SNR.
-\end{incode}
 
 % ==================================================================
-\section{Coherent detection}
-\subsection{The coherent front end}
-A coherent receiver mixes the signal with a local oscillator (LO) in a $90^\circ$ hybrid and
-detects the four outputs with two balanced photodiode pairs per polarization
-(\cref{fig:coherent-fe}). Balanced detection cancels the direct-detection terms $|E|^2$ and
-$|E_{\mathrm{LO}}|^2$ and leaves the beat term:
-\begin{equation}
-  i_I+j\,i_Q=\mathcal R\sqrt{P_{\mathrm{LO}}}\;E(t)\,e^{-j(2\pi\Delta f\,t+\phi_{\mathrm{LO}}(t))}+n(t).
-\end{equation}
-The field is thus translated linearly to the electrical domain, including its phase and
-polarization. With dual polarization a splitter feeds each hybrid with half of the LO, so
-$P_{\mathrm{LO}}$ above is \prm{lo_power_dbm} divided by the number of polarizations
-(\cref{fig:coherent-fe}). With a strong LO, the LO shot noise $2q\mathcal RP_{\mathrm{LO}}B$ dominates
-the thermal noise. The signal and the shot noise then scale together, so the LO split does not
-change the shot-noise-limited SNR, but it does change the margin over thermal noise.
+\section{Summary of the optical models}
+\Cref{tab:optical-models} lists the optical blocks with the theory they implement and the
+validation that ties them to it.
 
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}[node distance=5mm and 8mm]
-  \node[blockbox] (pbs) {PBS};
-  \node[blockbox,right=of pbs,yshift=10mm,minimum height=11mm] (hx) {$90^\circ$\\hybrid X};
-  \node[blockbox,right=of pbs,yshift=-10mm,minimum height=11mm] (hy) {$90^\circ$\\hybrid Y};
-  \node[warmbox,above=4mm of hx] (lox) {LO ($\Delta f$, $\Delta\nu$)};
-  \node[warmbox,below=4mm of hy] (loy) {LO ($\Delta f$, $\Delta\nu$)};
-  \node[greenbox,right=of hx,minimum width=13mm] (bx) {2 balanced\\PDs};
-  \node[greenbox,right=of hy,minimum width=13mm] (by) {2 balanced\\PDs};
-  \node[blockbox,right=of bx] (ax) {ADC};
-  \node[blockbox,right=of by] (ay) {ADC};
-  \node[left=6mm of pbs,lbl] (in) {$E_x,E_y$};
-  \draw[sig] (in)--(pbs); \draw[sig] (pbs.east)--(hx.west); \draw[sig] (pbs.east)--(hy.west);
-  \draw[sig] (lox)--(hx); \draw[sig] (loy)--(hy);
-  \draw[sig] (hx)--(bx); \draw[sig] (hy)--(by); \draw[sig] (bx)--node[above,lbl]{$I_x,Q_x$}(ax); \draw[sig] (by)--node[above,lbl]{$I_y,Q_y$}(ay);
-\end{tikzpicture}
-\caption{Polarization-diverse coherent front end, modelled by \blk{coherent_receiver}. One LO laser
-is split between the two hybrids.}
-\label{fig:coherent-fe}
-\end{figure}
-
-\begin{incode}
-The simulator processes each frame with circular FFTs (fiber, dispersion compensation). An LO
-phase that does not return to its initial value at the end of the frame would create a
-discontinuity at the frame boundary, spread over the frame by the dispersion compensator. The
-block therefore makes the LO phase periodic:
-\begin{itemize}
-  \item the frequency offset is rounded to the frame's frequency grid $f_s/n$;
-  \item the Wiener phase is turned into a Brownian bridge, $\phi_k-\frac kn\phi_n$, which has the
-  same local increments but returns to zero.
-\end{itemize}
-\end{incode}
-\codeexcerpt{coherent_rx}{Coherent detection with a periodic LO phase (\blk{coherent_receiver}).}
-
-\subsection{Coherent digital signal processing}\label{sec:coherent-dsp}
-The chain follows the architecture described by Savory~\cite{savory2010}.
-\Cref{fig:coherent-const} follows a 128\,Gb/s DP-QPSK signal through the DSP chain after
-$20\times80$\,km, with random polarization, a 1\,GHz LO offset and 100\,kHz lasers.
-
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}
-\begin{groupplot}[group style={group size=4 by 1,horizontal sep=4mm,y descriptions at=edge left},
-  constaxis,width=4.1cm,height=4.1cm,xmin=-2.2,xmax=2.2,ymin=-2.2,ymax=2.2,xtick={-2,0,2},ytick={-2,0,2}]
-\nextgroupplot[title={front-end output}]
-  \addplot[scatterpts=black!50] table[x=i,y=q]{\datafile{coh_rx}};
-\nextgroupplot[title={after CD + FO comp.}]
-  \addplot[scatterpts=accent4] table[x=i,y=q]{\datafile{coh_fo}};
-\nextgroupplot[title={after $2{\times}2$ equalizer}]
-  \addplot[scatterpts=accent] table[x=i,y=q]{\datafile{coh_eq}};
-\nextgroupplot[title={after phase recovery}]
-  \addplot[scatterpts=accent3] table[x=i,y=q]{\datafile{coh_cpr}};
-\end{groupplot}
-\end{tikzpicture}
-\caption{Polarization X of the \emph{Coherent DP-QPSK long haul} scenario at four points of
-the DSP chain (normalized to unit power).}
-\label{fig:coherent-const}
-\end{figure}
-
-\paragraph{Chromatic dispersion compensation.}
-The accumulated dispersion is known from the metadata (or given), and its all-pass response
-\cref{eq:dispersion-operator} is inverted exactly by multiplying with its conjugate in the
-frequency domain.
-\codeexcerpt{cd_comp}{Frequency-domain CD compensation.}
-
-\paragraph{Frequency-offset estimation.}
-Raising QPSK to the fourth power removes the modulation: $(s\,e^{j2\pi\Delta f t})^4=s^4e^{j2\pi4\Delta ft}$
-with $s^4=-1$ for every QPSK symbol, and approximately constant on average for square QAM. The
-spectrum of $r^4$ therefore has a line at $4\Delta f$. The estimate is the position of its peak
-divided by 4, refined by zero-padding and computed on a low-pass filtered copy to reject noise.
-In dual polarization a rotated mixture $as_1+bs_2$ has a fourth-power line proportional to
-$a^4+b^4$, which can vanish. The estimator therefore also uses the combinations
-$(x_0+x_1)/\sqrt2$ and $(x_0+jx_1)/\sqrt2$.
-
-Compensating the offset \emph{after} the dispersion compensator leaves a residual: the CD
-filter was applied to a spectrum shifted by $\Delta\omega$, so the error is
-$\exp\!\big(j\frac{\beta_2L}{2}(2\omega\Delta\omega+\Delta\omega^2)\big)$, a bulk delay
-$\beta_2L\Delta\omega$ plus a constant phase. The block removes it.
-\codeexcerpt{fo_est}{Fourth-power FO estimation over several polarization combinations.}
-
-\paragraph{Adaptive $2\times2$ equalization.}
-Polarization rotation, PMD and residual dispersion form a $2\times2$ MIMO channel, inverted by
-a fractionally spaced butterfly of four FIR filters (\cref{fig:butterfly}):
-\begin{equation}
-  y_p[k]=\sum_{q\in\{x,y\}}\vect w_{pq}\T\,\vect u_q[k],\qquad
-  \vect w_{pq}\leftarrow\vect w_{pq}+\mu\,e_p[k]\,\vect u_q\conj[k] .
-\end{equation}
-The error $e_p$ is either:
-\begin{itemize}
-  \item the constant-modulus error $y_p(R-|y_p|^2)$ with $R=\E|s|^4/\E|s|^2$ (Godard's
-  CMA~\cite{godard1980}), which is blind and insensitive to the carrier phase; or
-  \item the LMS error $d_p-y_p$, trained on known symbols and then decision-directed, with a
-  larger step during training.
-\end{itemize}
-
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}[x=1cm,y=1cm]
-  % input x feeds w_xx (to x out) and w_yx (to y out); input y feeds w_xy and w_yy
-  \node[lbl,anchor=east] (xi) at (0,0) {$x$ in};
-  \node[lbl,anchor=east] (yi) at (0,-3.3) {$y$ in};
-  \node[blockbox,minimum width=11mm] (wxx) at (2.2,0.2) {$\vect w_{xx}$};
-  \node[blockbox,minimum width=11mm] (wyx) at (2.2,-1.0) {$\vect w_{yx}$};
-  \node[blockbox,minimum width=11mm] (wxy) at (2.2,-2.3) {$\vect w_{xy}$};
-  \node[blockbox,minimum width=11mm] (wyy) at (2.2,-3.5) {$\vect w_{yy}$};
-  \node[sumnode] (sx) at (4.4,0) {$+$};
-  \node[sumnode] (sy) at (4.4,-3.3) {$+$};
-  \node[lbl,anchor=west] (xo) at (5.2,0) {$x$ out};
-  \node[lbl,anchor=west] (yo) at (5.2,-3.3) {$y$ out};
-  \coordinate (bx) at (0.7,0); \coordinate (by) at (0.7,-3.3);
-  \draw[thick] (xi.east) -- (bx); \draw[thick] (yi.east) -- (by);
-  \draw[sig] (bx) |- (wxx.west); \draw[sig] (bx) |- (wyx.west);
-  \draw[sig] (by) |- (wxy.west); \draw[sig] (by) |- (wyy.west);
-  \fill (bx) circle (1.2pt); \fill (by) circle (1.2pt);
-  \draw[sig] (wxx.east) -- (sx); \draw[sig] (wxy.east) -- (sx.south west);
-  \draw[sig] (wyy.east) -- (sy); \draw[sig] (wyx.east) -- (sy.north west);
-  \draw[sig] (sx) -- (xo); \draw[sig] (sy) -- (yo);
-\end{tikzpicture}
-\caption{The butterfly equalizer (2 samples per symbol, \prm{n_taps} taps per filter).}
-\label{fig:butterfly}
-\end{figure}
-\codeexcerpt{butterfly}{Butterfly update with CMA or trained/decision-directed LMS.}
-
-\paragraph{Carrier phase recovery.}
-Laser phase noise of $2\times100$\,kHz at 32\,GBd is slow, but large enough to need
-feed-forward tracking. Two estimators are available.
-\begin{itemize}
-  \item The Viterbi--Viterbi estimator removes the QPSK modulation with the fourth power:
-  $\hat\phi=\frac14\big(\arg\sum_{|i|\le W}y_{k+i}^4-\pi\big)$.
-  \item Blind phase search (BPS)~\cite{pfau2009} works for any square QAM. It rotates the
-  symbols by $B$ test phases in $[-\pi/4,\pi/4)$, sums over a window the squared distances to
-  the nearest constellation points, and keeps the phase with the smallest sum.
-\end{itemize}
-Both estimates are defined modulo $\pi/2$; they are unwrapped (on $4\hat\phi$) to follow the phase
-continuously. The remaining quadrant ambiguity is resolved once per frame with a short block of
-known symbols, taken after the equalizer has converged.
-\codeexcerpt{bps}{Viterbi--Viterbi and blind phase search.}
+\begin{table}[htbp]
+\centering\small
+\caption{Optical blocks, models and validation.}
+\label{tab:optical-models}
+\begin{tabularx}{\textwidth}{@{}lXl@{}}
+\toprule
+block & model & validation\\
+\midrule
+\blk{dml} & single-mode rate equations, transient and adiabatic chirp, parasitic pole & threshold, slope, linearization, Koch--Bowers\\
+\blk{vcsel} & Shi et al.: Bessel expansion (hole burning, diffusion), Tucker thermal model & $h_0$, turn-off, L-I rollover, \cref{fig:laser-response}\\
+\blk{intensity_modulator} & ideal PAM-M power levels from the extinction ratio & PAM levels, \cref{fig:pam-imdd}\\
+\blk{mach_zehnder_modulator} & CW laser + MZM sine law, push-pull / single arm, ER, IL & sine law, ER, chirp\\
+\blk{iq_modulator} & nested MZMs, PM transmitter, quadrature error & \cref{fig:coherent-ber}\\
+\blk{fiber} & NLSE / Manakov by split-step, PMD, fiber types & \cref{fig:dispersion,fig:spm,fig:soliton,fig:pmd}\\
+\blk{optical_amplifier} & $\sqrt G E+n$, $n_{sp}=F/2$, saturation & OSNR formula\\
+\blk{optical_link} & multi-span, $GA\ne1$, Raman, GN metrics & \cref{fig:osnr-spans,fig:osnr-span-length,fig:raman,fig:gn-launch}\\
+\blk{optical_attenuator} & VOA, splitter, connectors & loss\\
+\blk{photodiode} & PIN/APD + TIA, IRND, shot, excess noise, reference receiver & \cref{fig:snr-receivers,fig:pam-imdd}\\
+\blk{coherent_receiver} & 90° hybrid, balanced PDs, LO noise, ISNR & ISNR, LO split\\
+\blk{multimode_fiber} & mode groups / IEEE link model & \cref{fig:mmf-profile,fig:mmf-launch,fig:mmf-eyes}\\
+\bottomrule
+\end{tabularx}
+\end{table}

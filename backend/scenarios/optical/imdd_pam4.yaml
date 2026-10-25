@@ -1,15 +1,17 @@
-name: 56 Gb/s PAM-4 IM/DD optical link
+name: 56 Gb/s PAM-4 with a directly modulated laser
 category: Optical
-description: Directly modulated PAM-4 over standard single-mode fiber with a PIN receiver.
-  Increase the fiber length to see chromatic-dispersion power fading close the eye.
+description: 28 GBd PAM-4 from a directly modulated DFB laser (rate equations, 60 mA bias,
+  +-36 mA swing) over 10 km of O-band single-mode fiber into a PIN receiver. Near the zero-
+  dispersion wavelength the laser chirp is harmless; set mod.wavelength_nm to 1550 and
+  fib.dispersion_ps_nm_km to 17 to see chirp and chromatic dispersion close the eye.
 seed: 1
 batch_size: 8
 blocks:
   src: {type: random_bits, params: {n_bits: 4000}}
   map: {type: mapper, params: {scheme: pam, order: 4, symbol_rate: 28000000000.0}}
   tx: {type: pulse_shaper, params: {shape: rc, sps: 4, rolloff: 0.3}}
-  mod: {type: intensity_modulator, params: {power_dbm: 3.0, extinction_ratio_db: 8.0}}
-  fib: {type: fiber, params: {length_km: 5.0}}
+  mod: {type: dml, params: {bias_ma: 60.0, modulation_ma: 36.0, wavelength_nm: 1310.0}}
+  fib: {type: fiber, params: {length_km: 10.0, attenuation_db_km: 0.35, dispersion_ps_nm_km: 0.5}}
   opm: {type: optical_power_meter}
   pd: {type: photodiode}
   rx: {type: matched_filter, params: {shape: none}}
