@@ -10,7 +10,7 @@ from pydantic import Field
 from linkstudio.core import Block, BlockError, BlockParams, Kind, Port, RunContext, Signal, register_block
 
 
-@register_block("interleaver", category="bit_processing", subcategory="Interleaving", label="Interleaver")
+@register_block("interleaver", category="bit_processing", label="Interleaver")
 class Interleaver(Block):
     """Permute the bits (or LLRs) of every frame.
 

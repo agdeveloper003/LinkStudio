@@ -655,3 +655,30 @@ input[type="range"].bits-slider {
 .gauge-needle { stroke: #b91c1c; stroke-width: 1.6; stroke-linecap: round; transition: d 0.3s; }
 .gauge-hub { fill: #1f2937; }
 .gauge-value { fill: #e2e8f0; font: 700 11px "JetBrains Mono", Consolas, monospace; text-anchor: middle; }
+
+/* A physical block facing left: its drawing is mirrored, its text is not. */
+.frameless-node.flipped svg { transform: scaleX(-1); }
+.frameless-node.flipped svg text { transform: scaleX(-1); transform-box: fill-box; transform-origin: center; }
+
+/* Actions on a multiple selection, over the canvas. */
+.selection-bar {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+}
+.selection-bar button { padding: 3px 9px; font-size: 12px; }
+.selection-count { padding: 0 8px 0 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+/* Keyboard shortcuts. */
+.shortcut-help { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(8, 10, 15, 0.55); }
+.shortcut-card { width: min(460px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; padding: 14px 18px; background: var(--panel);
+  border: 1px solid var(--border-2); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,0.55); }
+.shortcut-title { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 8px; }
+.shortcut-card dl { margin: 0; display: grid; gap: 5px; }
+.shortcut-card dl > div { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: baseline; font-size: 12.5px; }
+.shortcut-card dt { white-space: nowrap; color: var(--muted); }
+.shortcut-card dd { margin: 0; }
+.shortcut-card kbd { display: inline-block; padding: 1px 6px; font: 600 11px "JetBrains Mono", Consolas, monospace; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border-2); border-bottom-width: 2px; border-radius: 4px; }
+.shortcut-card p { margin: 10px 0 0; }
+.block-node.flipped .art-svg { transform: scaleX(-1); }
+.block-node.flipped .art-svg text { transform: scaleX(-1); transform-box: fill-box; transform-origin: center; }

@@ -21,6 +21,8 @@ export interface LiveState {
   setProbes: (probes: Probe[]) => void;
   setRate: (rate: number) => void;
   resetMetrics: () => void;
+  /** Forget the last frame and error (another scenario was loaded). */
+  clear: () => void;
 }
 
 /** WebSocket session with the live simulation endpoint. */
@@ -86,6 +88,10 @@ export function useLive(): LiveState {
     setRate: (r) => {
       setRateState(r);
       send({ type: "rate", rate: r });
+    },
+    clear: () => {
+      setFrame(null);
+      setError(null);
     },
     resetMetrics: () => send({ type: "reset" }),
   };

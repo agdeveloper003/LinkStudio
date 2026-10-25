@@ -334,53 +334,128 @@ function AlamoutiArt({ data }: ArtProps) {
 
 // ========================================================== bit processing
 
+/** Small deterministic generator (mulberry32), to draw a permutation from a seed. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Interleaver. Random: the permutation (drawn from the seed) spreads a burst of three
+ * adjacent bits apart, which is what the block is for. Block: the matrix written row by
+ * row and read column by column (inverse: the other way round), numbered in write order.
+ */
 function InterleaverArt({ data }: ArtProps) {
   const random = data.params.kind !== "block";
   const inverse = data.params.inverse === true;
-  const rows = 4;
-  const cols = 7;
-  const perm = [3, 0, 5, 1, 6, 2, 4];
+  const seed = num(data.params.seed, 1234);
+  const n = 8;
+  const perm = useMemo(() => {
+    const rnd = seeded(seed);
+    const p = Array.from({ length: n }, (_, k) => k);
+    for (let k = n - 1; k > 0; k--) {
+      const j = Math.floor(rnd() * (k + 1));
+      [p[k], p[j]] = [p[j], p[k]];
+    }
+    return p; // output k takes input p[k]
+  }, [seed]);
+  const burst = (j: number) => j >= 3 && j <= 5;
+  const cw = 120 / n;
+  const cx = (k: number) => 10 + (k + 0.5) * cw;
+  if (random) {
+    return (
+      <Art caption={<><b>random</b> · seed {seed}{inverse ? " · inverse" : ""}</>}>
+        <Cells x={10} y={5} n={n} w={120} h={9} kind={(j) => (burst(j) ? "bad" : "")} />
+        <Cells x={10} y={42} n={n} w={120} h={9} kind={(k) => (burst(perm[k]) ? "bad" : "on")} />
+        {perm.map((j, k) => (
+          <path key={k} className={burst(j) ? "a-warn-line" : "a-line thin"} d={`M ${cx(j)} 14 C ${cx(j)} 28, ${cx(k)} 28, ${cx(k)} 42`} />
+        ))}
+      </Art>
+    );
+  }
+  const R = 4;
+  const C = 5;
+  const rows = num(data.params.rows, 16);
+  const cell = 13;
+  const x0 = 42;
+  const y0 = 5;
+  // Numbers in write order: rows (interleaver) or columns (inverse).
+  const order = (r: number, c: number) => (inverse ? c * R + r : r * C + c) + 1;
+  const first = (r: number, c: number) => (inverse ? r === 0 : c === 0); // read first
   return (
-    <Art caption={<><b>{random ? "random" : "block"}</b>{random ? "" : ` · ${num(data.params.rows, 16)} rows`}{inverse ? " · inverse" : ""}</>}>
-      {random ? (
+    <Art caption={<><b>block</b> · {rows} rows{inverse ? " · inverse" : ""}</>}>
+      {Array.from({ length: R }, (_, r) =>
+        Array.from({ length: C }, (_, c) => (
+          <g key={`${r}-${c}`}>
+            <rect className={`a-cell ${first(r, c) ? "on" : ""}`} x={x0 + c * cell + 0.4} y={y0 + r * 11} width={cell - 0.8} height={10} rx={1} />
+            <text className="a-tiny" x={x0 + c * cell + cell / 2} y={y0 + r * 11 + 7}>{order(r, c)}</text>
+          </g>
+        )),
+      )}
+      {inverse ? (
         <>
-          <Cells x={10} y={6} n={cols} w={120} h={9} />
-          <Cells x={10} y={42} n={cols} w={120} h={9} kind={() => "on"} />
-          {perm.map((j, i) => (
-            <path key={i} className="a-line thin" d={`M ${10 + (i + 0.5) * (120 / cols)} 15 C ${10 + (i + 0.5) * (120 / cols)} 28, ${10 + (j + 0.5) * (120 / cols)} 28, ${10 + (j + 0.5) * (120 / cols)} 42`} />
-          ))}
+          <path className="a-mute a-arrow" d={`M ${x0 - 6} ${y0} V ${y0 + R * 11 - 2} M ${x0 - 8.5} ${y0 + R * 11 - 5.5} L ${x0 - 6} ${y0 + R * 11 - 2} L ${x0 - 3.5} ${y0 + R * 11 - 5.5}`} />
+          <text className="a-small" x={6} y={y0 + 22}>write</text>
+          <Arrow x0={x0} x1={x0 + C * cell} y={y0 + R * 11 + 4} cls="a-line" />
+          <text className="a-small" x={x0 + C * cell + 4} y={y0 + R * 11 + 6}>read</text>
         </>
       ) : (
         <>
-          {Array.from({ length: rows }, (_, r) => (
-            <Cells key={r} x={30} y={6 + r * 11} n={cols} w={80} h={9} kind={(c) => ((r + c) % 2 ? "" : "on")} />
-          ))}
-          <Arrow x0={30} x1={110} y={2.5} />
-          <path className="a-line a-arrow" d="M 118 6 V 48 M 115.5 44.5 L 118 48 L 120.5 44.5" />
-          <text className="a-small" x={6} y={12}>write</text>
-          <text className="a-small" x={120} y={54}>read</text>
+          <Arrow x0={8} x1={x0 - 3} y={y0 + 5} />
+          <text className="a-small" x={8} y={y0 + 16}>write</text>
+          <path className="a-line a-arrow" d={`M ${x0 + C * cell + 6} ${y0} V ${y0 + R * 11 - 2} M ${x0 + C * cell + 3.5} ${y0 + R * 11 - 5.5} L ${x0 + C * cell + 6} ${y0 + R * 11 - 2} L ${x0 + C * cell + 8.5} ${y0 + R * 11 - 5.5}`} />
+          <text className="a-small" x={x0 + C * cell + 11} y={y0 + 22}>read</text>
         </>
       )}
     </Art>
   );
 }
 
-/** Additive scrambler: the data stream XOR-ed with an LFSR sequence. */
+/**
+ * Additive scrambler: the LFSR (its real taps and seed) feeds back through an XOR and
+ * its sequence is XOR-ed with the data; a run of zeros comes out as the scrambled bits.
+ */
 function ScramblerArt({ data }: ArtProps) {
-  const taps = (Array.isArray(data.params.taps) ? data.params.taps : [7, 4]) as number[];
-  const L = Math.max(...taps, 2);
-  const cells = Math.min(L, 8);
-  const cw = 84 / cells;
+  const taps = (Array.isArray(data.params.taps) && data.params.taps.length ? data.params.taps : [7, 4]).map(Number);
+  const deg = Math.max(...taps, 1);
+  const seed = num(data.params.seed, 0b1011101);
+  const cells = Math.min(deg, 8);
+  // State oldest bit first (MSB of the seed), as the backend; s[k] = XOR_t s[k - t].
+  const { state, seq } = useMemo(() => {
+    const s = Array.from({ length: deg }, (_, k) => (seed >> (deg - 1 - k)) & 1);
+    const state = [...s].reverse(); // newest first, as drawn (left = newest)
+    for (let k = 0; k < 8; k++) s.push(taps.reduce((acc, t) => acc ^ s[s.length - t], 0));
+    return { state, seq: s.slice(deg) };
+  }, [deg, seed, taps.join()]);
+  const rx = 70;
+  const rw = 64;
+  const cw = rw / cells;
+  const tapCell = (t: number) => Math.min(cells - 1, Math.round(((t - 1) / Math.max(deg - 1, 1)) * (cells - 1)));
+  const poly = [...taps].sort((a, b) => b - a);
   return (
-    <Art caption={<>x<sup>{taps[0]}</sup> + x<sup>{taps[1] ?? 1}</sup> + 1</>}>
-      <Cells x={26} y={6} n={cells} w={84} h={9} kind={(k) => (k % 3 ? "" : "on")} />
-      <path className="a-line thin" d={`M ${26 + 84 - cw / 2} 15 V 22 H 120 V 40`} />
-      <path className="a-line thin" d={`M ${26 + (Math.round(((taps[1] ?? 1) / L) * cells) - 0.5) * cw} 15 V 22`} />
-      <path className="a-line thin" d={`M 26 10.5 H 18 V 22 H 26`} />
-      <Arrow x0={4} x1={115} y={44} />
-      <XorNode x={120} y={44} />
-      <Arrow x0={124} x1={138} y={44} cls="a-line" />
-      <text className="a-small" x={4} y={52}>data</text>
+    <Art caption={<>{poly.map((t, k) => <span key={k}>x<sup>{t}</sup> + </span>)}1 · seed {seed}</>}>
+      <Cells x={rx} y={3} n={cells} w={rw} h={11} text={(k) => String(state[k] ?? 0)} kind={(k) => (taps.some((t) => tapCell(t) === k) ? "on" : "")} />
+      {taps.map((t) => (
+        <path key={t} className="a-line thin" d={`M ${rx + (tapCell(t) + 0.5) * cw} 14 V 20 H 60`} />
+      ))}
+      <path className="a-line thin" d="M 60 20 V 12.5" />
+      <XorNode x={60} y={8.5} />
+      <Arrow x0={64} x1={rx} y={8.5} cls="a-line" />
+      <path className="a-line thin" d="M 60 20 V 31.5" />
+      <circle className="a-dot accent" cx={60} cy={20} r={1.4} />
+      <Cells x={4} y={30} n={6} w={48} h={11} text={() => "0"} />
+      <Arrow x0={52} x1={56} y={35.5} />
+      <XorNode x={60} y={35.5} />
+      <Arrow x0={64} x1={68} y={35.5} cls="a-line" />
+      <Cells x={68} y={30} n={6} w={48} h={11} text={(k) => String(seq[k])} kind={(k) => (seq[k] ? "on" : "")} />
+      <text className="a-small" x={4} y={51}>data</text>
+      <text className="a-small" x={68} y={51}>scrambled</text>
     </Art>
   );
 }

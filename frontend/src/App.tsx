@@ -20,7 +20,8 @@ import { BlockNode } from "./components/BlockNode";
 import { Inspector } from "./components/Inspector";
 import { LivePanel } from "./components/LivePanel";
 import { DRAG_MIME, Palette } from "./components/Palette";
-import { ObstacleContext, RoutedEdge } from "./components/RoutedEdge";
+import { ObstacleContext, RouteContext, RoutedEdge, TAP_OFFSET } from "./components/RoutedEdge";
+import { routeLinks, type Link } from "./routing";
 import { ScenarioBrowser } from "./components/ScenarioBrowser";
 import { SimulatePanel } from "./components/SimulatePanel";
 import { SweepPanel } from "./components/SweepPanel";
@@ -36,8 +37,9 @@ import {
   uniqueName,
   type BlockNodeType,
 } from "./graph";
-import { nodeRect, snapPosition, spread, straighten, widen, type Guide } from "./snap";
-import { isScopeType } from "./geometry";
+import { nodeRect, portAnchor, snapPosition, type Guide } from "./snap";
+import { autoOrient, flipPorts, layoutGraph } from "./layout";
+import { horizontal, isScopeType, portKey, portPlaces } from "./geometry";
 import { kindColor, kindsCompatible } from "./theme";
 import { useLive } from "./useLive";
 
@@ -119,6 +121,10 @@ export default function App() {
   const pendingTap = useRef<{ scope: string; edge: Edge } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const clipboard = useRef<Snapshot | null>(null);
+  const dragStart = useRef(new Map<string, { x: number; y: number }>()); // where the dragged blocks started
+  const pointer = useRef<{ x: number; y: number } | null>(null); // mouse over the canvas, flow coordinates
+  const lastPaste = useRef<{ at: { x: number; y: number }; count: number } | null>(null);
+  const [help, setHelp] = useState(false);
   const undoStack = useRef<Snapshot[]>([]);
   const redoStack = useRef<Snapshot[]>([]);
   const lastSnapshot = useRef<Snapshot | null>(null);
@@ -144,6 +150,8 @@ export default function App() {
         const g = await api.loadScenario(path);
         const { nodes: n, edges: e } = fromEditorGraph(g, cat);
         live.stop();
+        live.clear(); // the readouts of the previous scenario do not apply
+        setRunData(EMPTY_RUN);
         restoring.current = true;
         setNodes(n);
         setEdges(e);
@@ -214,7 +222,8 @@ export default function App() {
 
   // ------------------------------------------------------------- history
   const positionsKey = useMemo(
-    () => nodes.map((n) => `${n.id}:${Math.round(n.position.x)},${Math.round(n.position.y)},${n.data.size ? `${Math.round(n.data.size.w)}x${Math.round(n.data.size.h)}` : ""}`).join("|"),
+    // Positions, sizes and port places: what undo restores besides the structure.
+    () => nodes.map((n) => `${n.id}:${Math.round(n.position.x)},${Math.round(n.position.y)},${n.data.size ? `${Math.round(n.data.size.w)}x${Math.round(n.data.size.h)}` : ""},${n.data.ports ? JSON.stringify(n.data.ports) : ""}`).join("|"),
     [nodes],
   );
   const probesKey = useMemo(() => JSON.stringify(probes), [probes]);
@@ -270,6 +279,11 @@ export default function App() {
   edgesRef.current = edges;
 
   const onNodesChange = useCallback((changes: NodeChange<BlockNodeType>[]) => {
+    for (const c of changes) {
+      if (c.type !== "position" || !c.dragging || dragStart.current.has(c.id)) continue;
+      const n = nodesRef.current.find((x) => x.id === c.id);
+      if (n) dragStart.current.set(c.id, n.position);
+    }
     // A single block being dragged snaps to its connected ports and to neighbouring blocks.
     const drags = changes.filter((c) => c.type === "position" && c.dragging && c.position);
     if (drags.length === 1 && drags[0].type === "position" && drags[0].position) {
@@ -290,6 +304,12 @@ export default function App() {
       setGuides([]);
     }
     setNodes((nds) => applyNodeChanges(changes, nds));
+    if (dragStart.current.size && changes.some((c) => c.type === "position" && !c.dragging)) {
+      // A block dragged to the other side of its neighbours turns around to face them.
+      const moved = new Map(dragStart.current);
+      dragStart.current.clear();
+      setNodes((nds) => autoOrient(nds, edgesRef.current, moved));
+    }
     for (const c of changes) if (c.type === "remove") setProbes((ps) => ps.filter((p) => !p.key.startsWith(`${c.id}.`)));
   }, []);
 
@@ -504,18 +524,85 @@ export default function App() {
     [],
   );
 
-  const deleteBlock = (name: string) => {
-    setNodes((nds) => nds.filter((n) => n.id !== name));
-    setEdges((eds) => eds.filter((e) => e.source !== name && e.target !== name));
-    updateProbes(probes.filter((p) => !p.key.startsWith(`${name}.`)));
+  const deleteBlocks = (ids: string[]) => {
+    const set = new Set(ids);
+    if (!set.size) return;
+    setNodes((nds) => nds.filter((n) => !set.has(n.id)));
+    setEdges((eds) => eds.filter((e) => !set.has(e.source) && !set.has(e.target)));
+    updateProbes(probes.filter((p) => !set.has(p.key.split(".")[0])));
     setSelected(null);
+  };
+  const deleteBlock = (name: string) => deleteBlocks([name]);
+
+  // ------------------------------------------------------ selection actions
+  /** The selected blocks (or the one shown in the inspector). */
+  const selectedIds = (): string[] => {
+    const ids = nodes.filter((n) => n.selected).map((n) => n.id);
+    return ids.length ? ids : nodes.some((n) => n.id === selected) ? [selected!] : [];
+  };
+
+  const updateBlocks = (ids: string[], f: (n: BlockNodeType) => BlockNodeType) => {
+    const set = new Set(ids);
+    if (set.size) setNodes((nds) => nds.map((n) => (set.has(n.id) ? f(n) : n)));
+  };
+
+  /** Turn the blocks around: inputs and outputs swap sides. */
+  const flipBlocks = (ids = selectedIds()) => updateBlocks(ids, (n) => ({ ...n, data: { ...n.data, ports: flipPorts(n.data) } }));
+
+  const nudge = (dx: number, dy: number) =>
+    updateBlocks(selectedIds(), (n) => ({ ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }));
+
+  const selectAll = (on: boolean) => {
+    setNodes((nds) => nds.map((n) => (!!n.selected === on ? n : { ...n, selected: on })));
+    if (!on) {
+      setEdges((eds) => eds.map((e) => (e.selected ? { ...e, selected: false } : e)));
+      setSelected(null);
+    }
+  };
+
+  /** Height of the first side port of a block (inputs first, or outputs first). */
+  const sidePortY = (n: BlockNodeType, first: "in" | "out"): number => {
+    const places = portPlaces(n.data);
+    const keys = Object.keys(places).filter((k) => horizontal(places[k].side));
+    keys.sort((a, b) => Number(!a.startsWith(first)) - Number(!b.startsWith(first)));
+    const a = keys.length ? portAnchor(n, keys[0]) : null;
+    return a ? a.y : n.position.y + nodeRect(n).h / 2;
+  };
+
+  /**
+   * Row: the blocks line up with the leftmost one so that the links between them are
+   * straight. Column: centred under the topmost one. Distribute: equal gaps, left to right.
+   */
+  const alignSelection = (how: "row" | "column" | "distribute") => {
+    const sel = nodes.filter((n) => n.selected);
+    if (sel.length < 2) return;
+    const byX = [...sel].sort((a, b) => a.position.x - b.position.x);
+    const moves = new Map<string, { x: number; y: number }>();
+    if (how === "row") {
+      const y0 = sidePortY(byX[0], "out");
+      for (const n of byX.slice(1)) moves.set(n.id, { x: n.position.x, y: n.position.y + y0 - sidePortY(n, "in") });
+    } else if (how === "column") {
+      const ref = [...sel].sort((a, b) => a.position.y - b.position.y)[0];
+      const cx = ref.position.x + nodeRect(ref).w / 2;
+      for (const n of sel) if (n !== ref) moves.set(n.id, { x: cx - nodeRect(n).w / 2, y: n.position.y });
+    } else {
+      if (sel.length < 3) return;
+      const last = byX[byX.length - 1];
+      const span = last.position.x + nodeRect(last).w - byX[0].position.x;
+      const gap = (span - byX.reduce((s, n) => s + nodeRect(n).w, 0)) / (byX.length - 1);
+      let x = byX[0].position.x;
+      for (const n of byX) {
+        moves.set(n.id, { x, y: n.position.y });
+        x += nodeRect(n).w + gap;
+      }
+    }
+    setNodes((nds) => nds.map((n) => (moves.has(n.id) ? { ...n, position: moves.get(n.id)! } : n)));
   };
 
   // ---------------------------------------------------- copy / paste
   const selectionSnapshot = (ids?: string[]): Snapshot | null => {
-    const set = new Set(ids ?? nodes.filter((n) => n.selected).map((n) => n.id));
-    if (!set.size && selected) set.add(selected);
-    if (!set.size) return null;
+    const set = new Set(ids ?? selectedIds());
+    if (!nodes.some((n) => set.has(n.id))) return null;
     return {
       nodes: nodes.filter((n) => set.has(n.id)),
       edges: edges.filter((e) => set.has(e.source) && set.has(e.target)),
@@ -523,7 +610,12 @@ export default function App() {
     };
   };
 
-  const pasteSnapshot = (snap: Snapshot) => {
+  /** Paste a copy, by default offset from the original; ``at`` puts its top-left corner there. */
+  const pasteSnapshot = (snap: Snapshot, at?: { x: number; y: number }) => {
+    const left = Math.min(...snap.nodes.map((n) => n.position.x));
+    const top = Math.min(...snap.nodes.map((n) => n.position.y));
+    const dx = at ? at.x - left : 40;
+    const dy = at ? at.y - top : 60;
     const taken = new Set(nodes.map((n) => n.id));
     const rename: Record<string, string> = {};
     for (const n of snap.nodes) {
@@ -534,7 +626,7 @@ export default function App() {
       ...n,
       id: rename[n.id],
       selected: true,
-      position: { x: n.position.x + 40, y: n.position.y + 60 },
+      position: { x: n.position.x + dx, y: n.position.y + dy },
       data: { ...n.data, probed: [] },
     }));
     const newEdges = snap.edges.map((e) => ({
@@ -574,6 +666,8 @@ export default function App() {
 
   const newScenario = () => {
     live.stop();
+    live.clear();
+    setRunData(EMPTY_RUN);
     restoring.current = true;
     setNodes([]);
     setEdges([]);
@@ -585,15 +679,13 @@ export default function App() {
     flow.setViewport({ x: 0, y: 0, zoom: 1 });
   };
 
-  const autoLayout = async () => {
+  /** Arrange the blocks along the signal flow, wrapped to the shape of the canvas. */
+  const autoLayout = () => {
     if (!nodes.length) return;
-    try {
-      const { positions } = await api.layout(getGraph());
-      setNodes((nds) => spread(straighten(widen(nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n))), edges)));
-      window.setTimeout(() => flow.fitView({ padding: 0.15, duration: 300 }), 50);
-    } catch (err) {
-      notify(`Layout failed: ${err instanceof Error ? err.message : err}`, true);
-    }
+    const r = canvasRef.current?.getBoundingClientRect();
+    const aspect = r && r.height > 0 ? r.width / r.height : 1.6;
+    setNodes((nds) => layoutGraph(nds, edges, aspect));
+    window.setTimeout(() => flow.fitView({ padding: 0.15, duration: 300 }), 50);
   };
 
   const exportPython = async () => {
@@ -625,8 +717,26 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
       const key = e.key.toLowerCase();
+      if (!mod) {
+        if (isTyping(e) || e.altKey) return;
+        if (e.key === "Escape") {
+          setHelp(false);
+          selectAll(false);
+        } else if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+          setHelp((h) => !h);
+        } else if (key === "f" && selectedIds().length) {
+          e.preventDefault();
+          flipBlocks();
+        } else if (e.key.startsWith("Arrow") && selectedIds().length) {
+          e.preventDefault();
+          const step = e.shiftKey ? 30 : 6;
+          const dir: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+          const [dx, dy] = dir[e.key] ?? [0, 0];
+          nudge(dx * step, dy * step);
+        }
+        return;
+      }
       if (key === "s") {
         e.preventDefault();
         void saveAs(e.shiftKey);
@@ -644,15 +754,30 @@ export default function App() {
       } else if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         redo();
-      } else if (key === "c") {
+      } else if (key === "a") {
+        e.preventDefault();
+        selectAll(true);
+      } else if (key === "c" || key === "x") {
         const snap = selectionSnapshot();
         if (snap) {
           clipboard.current = snap;
-          notify(`Copied ${snap.nodes.length} block${snap.nodes.length > 1 ? "s" : ""}`);
+          lastPaste.current = null;
+          const what = `${snap.nodes.length} block${snap.nodes.length > 1 ? "s" : ""}`;
+          if (key === "x") {
+            deleteBlocks(snap.nodes.map((n) => n.id));
+            notify(`Cut ${what}`);
+          } else notify(`Copied ${what}`);
         }
       } else if (key === "v" && clipboard.current) {
         e.preventDefault();
-        pasteSnapshot(clipboard.current);
+        // At the mouse; pasting again without moving it steps the copies down and right.
+        const at = pointer.current;
+        if (at) {
+          const same = lastPaste.current && Math.hypot(lastPaste.current.at.x - at.x, lastPaste.current.at.y - at.y) < 1;
+          const count = same ? lastPaste.current!.count + 1 : 0;
+          lastPaste.current = { at, count };
+          pasteSnapshot(clipboard.current, { x: at.x + count * 30, y: at.y + count * 30 });
+        } else pasteSnapshot(clipboard.current);
       } else if (key === "d") {
         e.preventDefault();
         duplicate();
@@ -737,6 +862,32 @@ export default function App() {
     [edges, outputKinds, live.running, scopeNames],
   );
 
+  // All links routed together, so that parallel ones sharing a channel are kept apart.
+  const routes = useMemo(
+    () => {
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const step = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] } as const;
+      const links: Link[] = [];
+      for (const e of edges) {
+        const src = byId.get(e.source);
+        const dst = byId.get(e.target);
+        if (!src || !dst) continue;
+        const a = portAnchor(src, portKey("out", e.sourceHandle ?? ""));
+        const b = portAnchor(dst, portKey("in", e.targetHandle ?? ""));
+        if (!a || !b) continue;
+        const off = scopeNames.has(e.target) ? TAP_OFFSET : 0; // a tap leaves from its junction dot
+        links.push({
+          id: e.id, net: `${e.source}.${e.sourceHandle}`,
+          s: { x: a.x + step[a.side][0] * off, y: a.y + step[a.side][1] * off }, sSide: a.side,
+          t: { x: b.x, y: b.y }, tSide: b.side,
+        });
+      }
+      return routeLinks(links, obstacles);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [obstacles, edges, scopeNames],
+  );
+
   const resources = {
     batch: meta.batch_size,
     workers: Math.max(1, workers),
@@ -753,6 +904,7 @@ export default function App() {
   };
 
   const selectedNode = nodes.find((n) => n.id === selected) ?? null;
+  const selectionCount = nodes.reduce((k, n) => k + (n.selected ? 1 : 0), 0);
   const blocked = !nodes.length
     ? "The scenario is empty."
     : validation && !validation.ok
@@ -768,6 +920,7 @@ export default function App() {
     <CatalogueContext.Provider value={catalogue}>
     <PortMoveContext.Provider value={movePort}>
     <ObstacleContext.Provider value={obstacles}>
+    <RouteContext.Provider value={routes}>
     <RunDataContext.Provider value={runValue}>
     <BlockActionsContext.Provider value={blockActions}>
       <div className="app">
@@ -788,7 +941,8 @@ export default function App() {
             <span className="sep" />
             <button onClick={undo} disabled={!historySize.undo} title="Undo (Ctrl+Z)">↶</button>
             <button onClick={redo} disabled={!historySize.redo} title="Redo (Ctrl+Y)">↷</button>
-            <button onClick={autoLayout} title="Arrange blocks automatically (Ctrl+L)">Layout</button>
+            <button onClick={autoLayout} title="Arrange the blocks along the signal flow (Ctrl+L)">Layout</button>
+            <button onClick={() => setHelp(true)} title="Keyboard shortcuts (?)">?</button>
             <button onClick={exportPython} title="Download a Python script that rebuilds and runs this scenario">Export .py</button>
             <span className="sep" />
             <button className={`icon-toggle${panels.left ? " active" : ""}`} onClick={() => togglePanel("left")} title="Show / hide the blocks panel (Ctrl+B)">
@@ -834,7 +988,14 @@ export default function App() {
               <div className="col-resizer" onMouseDown={startResize("left")} title="Drag to resize" />
             </>
           )}
-          <div className="canvas" ref={canvasRef} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+          <div
+            className="canvas"
+            ref={canvasRef}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onDrop}
+            onMouseMove={(e) => (pointer.current = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }))}
+            onMouseLeave={() => (pointer.current = null)}
+          >
             <ReactFlow<BlockNodeType>
               nodes={nodes}
               edges={styledEdges}
@@ -847,8 +1008,14 @@ export default function App() {
               isValidConnection={isValidConnection}
               onNodeClick={(_, n) => setSelected(n.id)}
               onPaneClick={() => setSelected(null)}
+              onSelectionChange={({ nodes: sel }) => {
+                if (sel.length === 1) setSelected(sel[0].id);
+                else if (sel.length > 1) setSelected(null);
+              }}
               deleteKeyCode={["Delete", "Backspace"]}
+              selectionKeyCode="Shift"
               multiSelectionKeyCode={["Shift", "Meta", "Control"]}
+              disableKeyboardA11y
               fitView
               minZoom={0.2}
               proOptions={{ hideAttribution: true }}
@@ -868,6 +1035,18 @@ export default function App() {
               <Controls />
               <MiniMap pannable zoomable nodeColor="#2b3245" maskColor="rgba(10,12,18,0.6)" style={{ width: 150, height: 96 }} />
             </ReactFlow>
+            {selectionCount > 1 && (
+              <div className="selection-bar">
+                <span className="selection-count">{selectionCount} blocks</span>
+                <button onClick={() => alignSelection("row")} title="Line the blocks up with the leftmost one: straight links">Align row</button>
+                <button onClick={() => alignSelection("column")} title="Centre the blocks under the topmost one">Align column</button>
+                <button onClick={() => alignSelection("distribute")} disabled={selectionCount < 3} title="Equal gaps between the blocks, left to right">Distribute</button>
+                <button onClick={() => flipBlocks()} title="Turn the blocks around: inputs and outputs swap sides (F)">Flip</button>
+                <button onClick={() => duplicate()} title="Duplicate (Ctrl+D)">Duplicate</button>
+                <button className="danger" onClick={() => deleteBlocks(selectedIds())} title="Delete (Del)">Delete</button>
+              </div>
+            )}
+            {help && <ShortcutHelp onClose={() => setHelp(false)} />}
             {!nodes.length && (
               <div className="canvas-hint">
                 <div>Drag blocks from the library, or</div>
@@ -887,6 +1066,7 @@ export default function App() {
             onRename={renameBlock}
             onDelete={deleteBlock}
             onDuplicate={(id) => duplicate([id])}
+            onFlip={(id) => flipBlocks([id])}
             onScenarioChange={(p) => setMeta({ ...meta, ...p })}
             onClose={() => togglePanel("right")}
             getGraph={getGraph}
@@ -909,6 +1089,7 @@ export default function App() {
       </div>
     </BlockActionsContext.Provider>
     </RunDataContext.Provider>
+    </RouteContext.Provider>
     </ObstacleContext.Provider>
     </PortMoveContext.Provider>
     </CatalogueContext.Provider>
@@ -921,5 +1102,45 @@ function PanelIcon({ side }: { side: "left" | "right" }) {
       <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
       <rect x={side === "left" ? 1.5 : 10} y="2.5" width="4.5" height="11" fill="currentColor" stroke="none" opacity="0.6" />
     </svg>
+  );
+}
+
+const SHORTCUTS: [string, string][] = [
+  ["Shift + drag", "Select the blocks in a box"],
+  ["Ctrl + click", "Add a block to the selection (or Shift + click)"],
+  ["Ctrl + A", "Select all"],
+  ["Esc", "Clear the selection"],
+  ["Ctrl + C / X / V", "Copy / cut / paste (at the mouse)"],
+  ["Ctrl + D", "Duplicate"],
+  ["Del", "Delete"],
+  ["Arrows", "Move the selection (Shift: further)"],
+  ["F", "Flip: inputs and outputs swap sides"],
+  ["Ctrl + L", "Arrange all the blocks along the signal flow"],
+  ["Ctrl + Z / Y", "Undo / redo"],
+  ["Ctrl + S", "Save (Shift: save as)"],
+  ["Ctrl + O", "Open a scenario"],
+  ["Ctrl + B / I", "Blocks panel / inspector"],
+  ["?", "Show these shortcuts"],
+];
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="shortcut-help" onClick={onClose}>
+      <div className="shortcut-card" onClick={(e) => e.stopPropagation()}>
+        <div className="shortcut-title">
+          Keyboard shortcuts
+          <button className="ghost" onClick={onClose} title="Close (Esc)">×</button>
+        </div>
+        <dl>
+          {SHORTCUTS.map(([k, v]) => (
+            <div key={k}>
+              <dt>{k.split(" + ").map((part, i) => <span key={i}>{i > 0 && " + "}<kbd>{part}</kbd></span>)}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="muted small">A block dragged to the other side of the blocks it is linked to turns around by itself.</p>
+      </div>
+    </div>
   );
 }

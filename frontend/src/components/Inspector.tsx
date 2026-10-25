@@ -15,6 +15,7 @@ interface Props {
   onRename: (oldName: string, newName: string) => string | null;
   onDelete: (node: string) => void;
   onDuplicate: (node: string) => void;
+  onFlip: (node: string) => void;
   onScenarioChange: (patch: { name?: string; description?: string; category?: string }) => void;
   onClose: () => void;
   getGraph: () => EditorGraph;
@@ -70,6 +71,7 @@ export function Inspector(props: Props) {
       <FrequencyResponse block={node.id} getGraph={props.getGraph} refreshKey={props.structureKey} />
 
       <div className="block-actions">
+        <button onClick={() => props.onFlip(node.id)} title="Turn the block around: inputs and outputs swap sides (F)">Flip</button>
         <button onClick={() => props.onDuplicate(node.id)} title="Duplicate (Ctrl+D)">Duplicate</button>
         <button className="danger" onClick={() => props.onDelete(node.id)} title="Delete (Del)">Delete</button>
       </div>

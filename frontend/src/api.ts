@@ -170,8 +170,6 @@ export const api = {
   startJob: (body: { mode: string; graph: EditorGraph; config: Record<string, unknown> }) =>
     request<Job>("/api/jobs", { method: "POST", body: JSON.stringify(body) }),
   job: (id: string) => request<Job>(`/api/jobs/${id}`),
-  layout: (graph: EditorGraph) =>
-    request<{ positions: Record<string, { x: number; y: number }> }>("/api/layout", { method: "POST", body: JSON.stringify(graph) }),
   exportPython: (graph: EditorGraph) =>
     request<{ code: string }>("/api/export/python", { method: "POST", body: JSON.stringify(graph) }),
   response: (graph: EditorGraph, block: string) =>

@@ -9,7 +9,7 @@ from linkstudio.core import Block, BlockParams, Kind, Port, RunContext, Signal, 
 from linkstudio.phy.dsp.lfsr import int_to_state, lfsr_sequence
 
 
-@register_block("scrambler", category="bit_processing", subcategory="Scrambling", label="Scrambler")
+@register_block("scrambler", category="bit_processing", label="Scrambler")
 class Scrambler(Block):
     """XOR every frame with the same LFSR sequence.
 

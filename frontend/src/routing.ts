@@ -249,3 +249,86 @@ export function midpoint(pts: Point[]): Point {
   }
   return pts[0];
 }
+
+export interface Link {
+  id: string;
+  /** Links leaving the same output form one net: they may share a track. */
+  net: string;
+  s: Point;
+  sSide: Side;
+  t: Point;
+  tSide: Side;
+}
+
+const TRACK = 6; // spacing of parallel links sharing a channel
+
+/**
+ * Route every link, then pull apart the parallel segments of different nets that the
+ * router laid on the same line (they would read as one link). The first and last
+ * segments (the port stubs) stay put; moving an inner segment sideways only lengthens
+ * or shortens its two neighbours, so the path stays orthogonal.
+ */
+export function routeLinks(links: Link[], blocks: Rect[]): Map<string, Point[]> {
+  const routes = new Map<string, Point[]>();
+  for (const l of links) {
+    const pts = routeOrthogonal(l.s, l.sSide, l.t, l.tSide, blocks);
+    if (pts) routes.set(l.id, pts);
+  }
+  interface Seg {
+    id: string;
+    net: string;
+    k: number; // segment from pts[k] to pts[k + 1]
+    horiz: boolean;
+    at: number;
+    lo: number;
+    hi: number;
+  }
+  const groups = new Map<string, Seg[]>();
+  const netOf = new Map(links.map((l) => [l.id, l.net]));
+  for (const [id, pts] of routes) {
+    for (let k = 1; k < pts.length - 2; k++) {
+      const a = pts[k];
+      const b = pts[k + 1];
+      const horiz = Math.abs(a.y - b.y) < 0.5;
+      const seg: Seg = {
+        id, net: netOf.get(id)!, k, horiz,
+        at: horiz ? a.y : a.x,
+        lo: horiz ? Math.min(a.x, b.x) : Math.min(a.y, b.y),
+        hi: horiz ? Math.max(a.x, b.x) : Math.max(a.y, b.y),
+      };
+      const key = `${horiz ? "h" : "v"}${Math.round(seg.at * 2) / 2}`;
+      (groups.get(key) ?? groups.set(key, []).get(key)!).push(seg);
+    }
+  }
+  const shifts: { seg: Seg; d: number }[] = [];
+  for (const segs of groups.values()) {
+    if (new Set(segs.map((s) => s.net)).size < 2) continue;
+    segs.sort((a, b) => a.lo - b.lo);
+    // Clusters of overlapping segments along the line.
+    let cluster: Seg[] = [];
+    let end = -Infinity;
+    const flush = () => {
+      const nets = [...new Set(cluster.map((s) => s.net))].sort();
+      if (nets.length > 1) {
+        const step = Math.min(TRACK, 18 / (nets.length - 1));
+        for (const seg of cluster) shifts.push({ seg, d: (nets.indexOf(seg.net) - (nets.length - 1) / 2) * step });
+      }
+      cluster = [];
+    };
+    for (const seg of segs) {
+      if (cluster.length && seg.lo >= end - 1) flush();
+      cluster.push(seg);
+      end = cluster.length === 1 ? seg.hi : Math.max(end, seg.hi);
+    }
+    flush();
+  }
+  for (const { seg, d } of shifts) {
+    if (!d) continue;
+    const pts = routes.get(seg.id)!;
+    for (const p of [pts[seg.k], pts[seg.k + 1]]) {
+      if (seg.horiz) p.y += d;
+      else p.x += d;
+    }
+  }
+  return routes;
+}

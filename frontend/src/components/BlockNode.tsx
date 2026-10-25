@@ -5,6 +5,17 @@ import { BlockActionsContext, PortMoveContext, useCatalogue } from "../context";
 import { blockSize, bodySpec, isScopeType, placeFromPoint, placePoint, portKey, portPlaces, type BlockSize } from "../geometry";
 import type { BlockData, BlockNodeType } from "../graph";
 import { CATEGORY_COLORS, kindColor } from "../theme";
+import { facesLeft } from "../layout";
+
+/**
+ * Drawings that are plots against frequency or time (spectra, pulses, responses): they
+ * keep their axes when the block faces left; the other drawings follow the signal flow.
+ */
+const PLOTS = new Set([
+  "ofdm_modulator", "ofdm_demodulator", "dmt_modulator", "dmt_demodulator", "pulse_shaper", "matched_filter",
+  "fir_filter", "ctle", "ofdm_channel_estimator", "ofdm_equalizer", "quantizer", "jitter", "line_encoder", "line_decoder",
+]);
+const mirrorArt = (data: BlockData) => !PLOTS.has(data.type) && facesLeft(data);
 import { ScopeScreen, ScopeSelector, ScopeViewSelector, displayFor, useScopePorts } from "./BlockDisplays";
 
 /** Set by the library: blocks are drawn as pictures, without React Flow handles. */
@@ -116,7 +127,7 @@ export function BlockView({ id, name = id, data, selected }: { id: string; name?
     const bare = (name: string) => name === "in" || name === "out";
     return (
       <div
-        className={`frameless-node display-${data.type}${selected ? " selected" : ""}${data.error ? " error" : ""}`}
+        className={`frameless-node display-${data.type}${facesLeft(data) ? " flipped" : ""}${selected ? " selected" : ""}${data.error ? " error" : ""}`}
         style={{ width: size.w, height: size.h, ["--c" as string]: color }}
         title={`${id} - ${info?.label ?? data.type}`}
       >
@@ -134,7 +145,7 @@ export function BlockView({ id, name = id, data, selected }: { id: string; name?
 
   return (
     <div
-      className={`block-node${scope ? " scope-node" : ""}${Display ? ` display-node display-${data.type}` : ""}${selected ? " selected" : ""}${data.error ? " error" : ""}`}
+      className={`block-node${scope ? " scope-node" : ""}${mirrorArt(data) ? " flipped" : ""}${Display ? ` display-node display-${data.type}` : ""}${selected ? " selected" : ""}${data.error ? " error" : ""}`}
       style={{ width: size.w, height: size.h, ["--c" as string]: color }}
     >
       <div className="block-node-header" style={{ borderTopColor: color }}>

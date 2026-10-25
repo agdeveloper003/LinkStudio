@@ -87,35 +87,8 @@ export function snapPosition(node: BlockNodeType, pos: Point, nodes: BlockNodeTy
   return { pos: snapped, guides };
 }
 
-/** After an automatic layout: move blocks fed by a single link so that the link is straight. */
-export function straighten(nodes: BlockNodeType[], edges: Edge[]): BlockNodeType[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const order = [...nodes].sort((a, b) => a.position.x - b.position.x);
-  for (const n of order) {
-    const incoming = edges.filter((e) => e.target === n.id);
-    if (incoming.length !== 1) continue;
-    const e = incoming[0];
-    const src = byId.get(e.source);
-    if (!src) continue;
-    const a = portAnchor(src, portKey("out", e.sourceHandle ?? ""));
-    const b = portAnchor(n, portKey("in", e.targetHandle ?? ""));
-    if (!a || !b || !horizontal(a.side) || !horizontal(b.side)) continue;
-    const dy = a.y - b.y;
-    if (Math.abs(dy) > 60 || a.x >= b.x) continue;
-    const moved = { ...n, position: { x: n.position.x, y: n.position.y + dy } };
-    const r = nodeRect(moved);
-    const overlaps = nodes.some((o) => {
-      if (o.id === n.id) return false;
-      const q = nodeRect(byId.get(o.id)!);
-      return r.x < q.x + q.w + 10 && q.x < r.x + r.w + 10 && r.y < q.y + q.h + 10 && q.y < r.y + r.h + 10;
-    });
-    if (!overlaps) byId.set(n.id, moved);
-  }
-  return nodes.map((n) => byId.get(n.id)!);
-}
-
 /**
- * After the automatic layout (a fixed grid): push blocks down until none overlaps a block
+ * After the automatic layout: push blocks down until none overlaps a block
  * above it, using the real block sizes. Blocks with ports on the bottom side keep extra
  * room below for the links that enter there.
  */
@@ -141,21 +114,4 @@ export function spread(nodes: BlockNodeType[]): BlockNodeType[] {
     out.set(n.id, r.y === n.position.y ? n : { ...n, position: { x: n.position.x, y: r.y } });
   }
   return nodes.map((n) => out.get(n.id)!);
-}
-
-/**
- * After the automatic layout: the columns of the grid have a fixed pitch; move each column
- * right of the widest block of the column before it, with a gap for the links.
- */
-export function widen(nodes: BlockNodeType[]): BlockNodeType[] {
-  const GAP = 56;
-  const columns = [...new Set(nodes.map((n) => Math.round(n.position.x)))].sort((a, b) => a - b);
-  const shift = new Map<number, number>();
-  let x = columns[0] ?? 0;
-  for (const c of columns) {
-    shift.set(c, x);
-    const widest = Math.max(...nodes.filter((n) => Math.round(n.position.x) === c).map((n) => nodeRect(n).w));
-    x += widest + GAP;
-  }
-  return nodes.map((n) => ({ ...n, position: { x: shift.get(Math.round(n.position.x)) ?? n.position.x, y: n.position.y } }));
 }
